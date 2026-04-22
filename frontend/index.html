@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Chatbot tìm kiếm tài liệu công ty thông minh cho nhân viên">
+    <title>DocSearch — Tìm Kiếm Tài Liệu Công Ty</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                    </div>
+                    <h1>DocSearch</h1>
+                </div>
+                <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Upload Section -->
+            <div class="sidebar-section">
+                <h2 class="section-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Upload Tài Liệu
+                </h2>
+                <div class="upload-zone" id="uploadZone">
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.txt" multiple hidden>
+                    <div class="upload-content">
+                        <div class="upload-icon">
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </div>
+                        <p class="upload-text">Kéo thả file vào đây</p>
+                        <p class="upload-subtext">hoặc <span class="upload-link">chọn file</span></p>
+                        <p class="upload-formats">PDF, DOCX, XLSX, TXT</p>
+                    </div>
+                </div>
+                <!-- Upload Progress -->
+                <div class="upload-progress hidden" id="uploadProgress">
+                    <div class="progress-info">
+                        <span class="progress-filename" id="progressFilename"></span>
+                        <span class="progress-status" id="progressStatus">Đang xử lý...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Documents List -->
+            <div class="sidebar-section documents-section">
+                <h2 class="section-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    Tài Liệu
+                    <span class="doc-count" id="docCount">0</span>
+                </h2>
+                <div class="documents-list" id="documentsList">
+                    <div class="empty-state" id="emptyDocs">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.4">
+                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                            <polyline points="13 2 13 9 20 9"></polyline>
+                        </svg>
+                        <p>Chưa có tài liệu</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="sidebar-footer">
+                <div class="stats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="statDocs">0</span>
+                        <span class="stat-label">Tài liệu</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="statChunks">0</span>
+                        <span class="stat-label">Đoạn văn</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Mobile Header -->
+            <div class="mobile-header">
+                <button class="menu-btn" id="menuBtn" aria-label="Open menu">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
+                <span class="mobile-title">DocSearch</span>
+            </div>
+
+            <!-- Search Area -->
+            <div class="search-container">
+                <div class="search-hero" id="searchHero">
+                    <h2 class="hero-title">Tìm kiếm tài liệu công ty</h2>
+                    <p class="hero-subtitle">Đặt câu hỏi bằng ngôn ngữ tự nhiên để tìm thông tin trong tài liệu</p>
+                </div>
+                <div class="search-box">
+                    <div class="search-input-wrapper">
+                        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input 
+                            type="text" 
+                            id="searchInput" 
+                            class="search-input" 
+                            placeholder="Ví dụ: Quy trình xin nghỉ phép như thế nào?"
+                            autocomplete="off"
+                        >
+                        <button class="search-btn" id="searchBtn" aria-label="Search">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                <polyline points="12 5 19 12 12 19"></polyline>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Area -->
+            <div class="results-container" id="resultsContainer">
+                <!-- Loading -->
+                <div class="loading hidden" id="loading">
+                    <div class="loading-dots">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <p>Đang tìm kiếm...</p>
+                </div>
+                
+                <!-- AI Answer Box -->
+                <div class="ai-answer-container hidden" id="aiAnswerContainer">
+                    <div class="ai-answer-header">
+                        <svg class="ai-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a2 2 0 0 1 2 2c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2z"></path>
+                            <path d="M19 8h-2a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2v-2"></path>
+                            <path d="M5 8h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5v-2"></path>
+                            <rect x="9" y="8" width="6" height="10" rx="1"></rect>
+                            <path d="M12 18v4"></path>
+                            <line x1="10" y1="22" x2="14" y2="22"></line>
+                        </svg>
+                        <h3>AI Tổng hợp</h3>
+                    </div>
+                    <div class="ai-answer-content" id="aiAnswerContent"></div>
+                    <div class="ai-citations" id="aiCitations"></div>
+                </div>
+
+                <!-- Results -->
+                <div class="results-header hidden" id="resultsHeader">
+                    <h3>Nguồn tham khảo</h3>
+                </div>
+                <div class="results-list" id="resultsList"></div>
+
+                <!-- No results -->
+                <div class="no-results hidden" id="noResults">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.4">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        <line x1="8" y1="8" x2="14" y2="14"></line>
+                        <line x1="14" y1="8" x2="8" y2="14"></line>
+                    </svg>
+                    <p>Không tìm thấy kết quả phù hợp</p>
+                    <span>Thử tìm kiếm với từ khóa khác</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/script.js?v=2"></script>
+</body>
+</html>
