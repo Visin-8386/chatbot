@@ -44,5 +44,5 @@ def embed_query(query: str) -> List[float]:
     embedding = model.encode([prefixed_query], normalize_embeddings=True)
     end_time = time.time()
     
-    print(f"⚡ Embedding Speed (Query): {(end_time - start_time) * 1000:.2f} ms")
+    print(f"[EMBED] Query speed: {(end_time - start_time) * 1000:.2f} ms")
     return embedding[0].tolist()

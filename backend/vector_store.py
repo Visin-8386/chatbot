@@ -2,8 +2,16 @@
 Vector Store - ChromaDB wrapper for document storage and retrieval.
 """
 import chromadb
-from typing import List, Dict, Optional
-from backend.config import CHROMA_DIR, TOP_K, SIMILARITY_THRESHOLD
+import re
+from typing import List, Dict
+from backend.config import (
+    CHROMA_DIR,
+    TOP_K,
+    SIMILARITY_THRESHOLD,
+    RETRIEVAL_CANDIDATE_MULTIPLIER,
+    RERANK_EMBEDDING_WEIGHT,
+    RERANK_KEYWORD_WEIGHT,
+)
 from backend.embedding_service import embed_passages, embed_query
 
 # Collection name
@@ -12,6 +20,26 @@ COLLECTION_NAME = "company_documents"
 # Global client
 _client = None
 _collection = None
+
+_STOPWORDS = {
+    "va", "và", "la", "là", "cua", "của", "cho", "tren", "trên", "duoc", "được",
+    "the", "thi", "thì", "khi", "co", "có", "khong", "không", "mot", "một", "nhung", "những",
+    "to", "from", "in", "on", "at", "is", "are", "be", "a", "an", "the", "for", "of", "and", "or"
+}
+
+
+def _tokenize(text: str) -> set:
+    tokens = re.findall(r"[\w\-]+", text.lower())
+    return {token for token in tokens if len(token) > 1 and token not in _STOPWORDS}
+
+
+def _keyword_overlap_score(query_tokens: set, text: str) -> float:
+    if not query_tokens:
+        return 0.0
+    text_tokens = _tokenize(text)
+    if not text_tokens:
+        return 0.0
+    return len(query_tokens.intersection(text_tokens)) / len(query_tokens)
 
 
 def get_collection():
@@ -75,15 +103,22 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
         List of results with text, metadata, and similarity score.
     """
     collection = get_collection()
+    effective_top_k = TOP_K if top_k is None else max(1, int(top_k))
 
     if collection.count() == 0:
         return []
 
+    candidate_count = min(
+        max(effective_top_k * RETRIEVAL_CANDIDATE_MULTIPLIER, effective_top_k),
+        collection.count()
+    )
+
     query_embedding = embed_query(query)
+    query_tokens = _tokenize(query)
 
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=min(top_k, collection.count()),
+        n_results=candidate_count,
         include=["documents", "metadatas", "distances"]
     )
 
@@ -99,13 +134,23 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
             if similarity < SIMILARITY_THRESHOLD:
                 continue
 
+            keyword_score = _keyword_overlap_score(query_tokens, results["documents"][0][i])
+            rerank_score = (
+                RERANK_EMBEDDING_WEIGHT * (similarity / 100.0) +
+                RERANK_KEYWORD_WEIGHT * keyword_score
+            ) * 100
+
             formatted_results.append({
                 "text": results["documents"][0][i],
                 "metadata": results["metadatas"][0][i],
-                "similarity": round(similarity, 1)
+                "similarity": round(similarity, 1),
+                "rerank_score": round(rerank_score, 1)
             })
 
-    return formatted_results
+    formatted_results.sort(key=lambda item: item["rerank_score"], reverse=True)
+    for item in formatted_results:
+        item.pop("rerank_score", None)
+    return formatted_results[:effective_top_k]
 
 
 def delete_document(doc_id: str) -> int:

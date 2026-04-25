@@ -3,6 +3,7 @@ Document Processor - Handles reading and chunking different document types.
 Supports: PDF, DOCX, XLSX, TXT
 """
 import os
+import re
 from typing import List, Dict
 from PyPDF2 import PdfReader
 from docx import Document as DocxDocument
@@ -89,32 +90,104 @@ EXTRACTORS = {
 }
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """Split text into overlapping chunks."""
-    if len(text) <= chunk_size:
-        return [text]
+def _normalize_text(text: str) -> str:
+    """Normalize whitespace while preserving paragraph boundaries."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    paragraphs = []
+    current = []
 
+    for line in lines:
+        if not line:
+            if current:
+                paragraphs.append(" ".join(current).strip())
+                current = []
+            continue
+        current.append(line)
+
+    if current:
+        paragraphs.append(" ".join(current).strip())
+
+    return "\n\n".join(paragraphs)
+
+
+def _split_long_unit(unit: str, max_size: int) -> List[str]:
+    """Split oversized text unit by sentence boundaries, fallback to hard split."""
+    if len(unit) <= max_size:
+        return [unit]
+
+    sentence_parts = [part.strip() for part in re.split(r"(?<=[\.!\?;:])\s+", unit) if part.strip()]
+    if len(sentence_parts) <= 1:
+        return [unit[i:i + max_size].strip() for i in range(0, len(unit), max_size) if unit[i:i + max_size].strip()]
+
+    result = []
+    current = ""
+    for sentence in sentence_parts:
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if len(candidate) <= max_size:
+            current = candidate
+            continue
+
+        if current:
+            result.append(current)
+        if len(sentence) <= max_size:
+            current = sentence
+        else:
+            hard_parts = [sentence[i:i + max_size].strip() for i in range(0, len(sentence), max_size) if sentence[i:i + max_size].strip()]
+            result.extend(hard_parts[:-1])
+            current = hard_parts[-1] if hard_parts else ""
+
+    if current:
+        result.append(current)
+
+    return result
+
+
+def _build_chunks_from_units(units: List[str], chunk_size: int, overlap: int) -> List[str]:
+    """Assemble units into overlap-aware chunks."""
+    if not units:
+        return []
+
+    overlap_units = max(1, overlap // 120) if overlap > 0 else 0
     chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
+    current_units: List[str] = []
+    current_len = 0
 
-        # Try to break at a sentence or newline boundary
-        if end < len(text):
-            # Look for the last sentence-ending punctuation within the chunk
-            for sep in ["\n\n", "\n", ". ", "! ", "? ", "; "]:
-                last_sep = text[start:end].rfind(sep)
-                if last_sep != -1 and last_sep > chunk_size * 0.3:
-                    end = start + last_sep + len(sep)
-                    break
+    for unit in units:
+        unit_len = len(unit)
+        additional_len = unit_len + (1 if current_units else 0)
 
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        if current_units and current_len + additional_len > chunk_size:
+            chunks.append(" ".join(current_units).strip())
+            if overlap_units > 0:
+                current_units = current_units[-overlap_units:]
+                current_len = len(" ".join(current_units))
+            else:
+                current_units = []
+                current_len = 0
 
-        start = end - overlap
+        current_units.append(unit)
+        current_len = len(" ".join(current_units))
+
+    if current_units:
+        chunks.append(" ".join(current_units).strip())
 
     return chunks
+
+
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+    """Split text into semantically coherent overlapping chunks."""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return []
+    if len(normalized) <= chunk_size:
+        return [normalized]
+
+    paragraph_units = [p.strip() for p in re.split(r"\n\n+", normalized) if p.strip()]
+    expanded_units: List[str] = []
+    for unit in paragraph_units:
+        expanded_units.extend(_split_long_unit(unit, chunk_size))
+
+    return _build_chunks_from_units(expanded_units, chunk_size, overlap)
 
 
 def process_document(file_path: str) -> List[Dict]:

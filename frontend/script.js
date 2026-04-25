@@ -4,6 +4,15 @@
  */
 
 const API_BASE = '';
+const APP_CONFIG = window.__DOCSEARCH_CONFIG__ || {};
+
+function buildHeaders(baseHeaders = {}) {
+    const headers = { ...baseHeaders };
+    if (APP_CONFIG.apiKey) {
+        headers['X-API-Key'] = APP_CONFIG.apiKey;
+    }
+    return headers;
+}
 
 // === DOM Elements ===
 const searchInput = document.getElementById('searchInput');
@@ -60,6 +69,9 @@ async function performSearch(query) {
     resultsList.innerHTML = '';
 
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
         // Update loading message for AI generation
         setTimeout(() => {
             if (!loading.classList.contains('hidden') && loadingText) {
@@ -69,9 +81,12 @@ async function performSearch(query) {
 
         const response = await fetch(`${API_BASE}/api/search`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query.trim(), top_k: 5 })
+            headers: buildHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ query: query.trim(), top_k: 3 }),
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             const err = await response.json();
@@ -81,22 +96,19 @@ async function performSearch(query) {
         const data = await response.json();
         loading.classList.add('hidden');
 
-        if (data.results.length === 0) {
-            noResults.classList.remove('hidden');
-            return;
-        }
-
-        // Render AI Answer if available
+        // Render AI answer/clarification first, even if results are empty
         if (data.ai_answer) {
             aiAnswerContainer.classList.remove('hidden');
-            // Format basic markdown (bold and newlines)
             let formattedAnswer = escapeHtml(data.ai_answer)
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\n/g, '<br>');
             aiAnswerContent.innerHTML = formattedAnswer;
+            renderCitations(data.ai_sources || [], data.results || []);
+        }
 
-            // Render citations from ai_sources
-            renderCitations(data.ai_sources || [], data.results);
+        if (!data.results || data.results.length === 0) {
+            noResults.classList.remove('hidden');
+            return;
         }
 
         // Show sources header
@@ -104,6 +116,10 @@ async function performSearch(query) {
         renderResults(data.results, query.trim());
     } catch (error) {
         loading.classList.add('hidden');
+        if (error.name === 'AbortError') {
+            showToast('Yêu cầu mất quá nhiều thời gian. Vui lòng thử câu hỏi ngắn hơn hoặc giảm số tài liệu.', 'error');
+            return;
+        }
         showToast(`Lỗi tìm kiếm: ${error.message}`, 'error');
     }
 }
@@ -268,6 +284,7 @@ async function uploadFile(file) {
 
         const response = await fetch(`${API_BASE}/api/upload`, {
             method: 'POST',
+            headers: buildHeaders(),
             body: formData
         });
 
@@ -300,7 +317,9 @@ async function uploadFile(file) {
 // === Documents Management ===
 async function loadDocuments() {
     try {
-        const response = await fetch(`${API_BASE}/api/stats`);
+        const response = await fetch(`${API_BASE}/api/stats`, {
+            headers: buildHeaders()
+        });
         if (!response.ok) throw new Error('Failed to load');
 
         const data = await response.json();
@@ -354,7 +373,8 @@ async function deleteDocument(docId) {
 
     try {
         const response = await fetch(`${API_BASE}/api/documents/${docId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: buildHeaders()
         });
 
         if (!response.ok) {
