@@ -4,6 +4,7 @@ Vector Store - ChromaDB wrapper for document storage and retrieval.
 import chromadb
 import re
 from typing import List, Dict
+from chromadb.config import Settings
 from backend.config import (
     CHROMA_DIR,
     TOP_K,
@@ -46,7 +47,10 @@ def get_collection():
     """Get or create the ChromaDB collection."""
     global _client, _collection
     if _collection is None:
-        _client = chromadb.PersistentClient(path=CHROMA_DIR)
+        _client = chromadb.PersistentClient(
+            path=CHROMA_DIR,
+            settings=Settings(anonymized_telemetry=False)
+        )
         _collection = _client.get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"}

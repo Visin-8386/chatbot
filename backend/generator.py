@@ -5,6 +5,7 @@ No external API needed. Runs entirely on your RTX 3060.
 import torch
 import threading
 import re
+import warnings
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import List, Dict
 from backend.config import (
@@ -20,6 +21,12 @@ _tokenizer = None
 _model = None
 _tokenizer_lock = threading.Lock()
 _model_lock = threading.Lock()
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"1Torch was not compiled with flash attention.*",
+    category=UserWarning,
+)
 
 
 def get_tokenizer() -> AutoTokenizer:
@@ -50,6 +57,10 @@ def get_model() -> AutoModelForCausalLM:
                     dtype=torch.float16,
                     device_map=device
                 )
+                if hasattr(_model, "generation_config"):
+                    _model.generation_config.temperature = None
+                    _model.generation_config.top_p = None
+                    _model.generation_config.top_k = None
                 if torch.cuda.is_available():
                     vram_mb = torch.cuda.memory_allocated() / 1024 / 1024
                     print(f"[GPU] VRAM used: {vram_mb:.0f} MB")
