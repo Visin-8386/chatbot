@@ -24,4 +24,4 @@ jobs:
 
       - name: Run chunking regression tests
         run: |
-          pytest -q test_chunking.py
+          pytest -q tests/test_chunking.py
