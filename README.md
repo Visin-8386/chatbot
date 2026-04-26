@@ -50,14 +50,22 @@ DocSearch áp dụng luồng xử lý RAG (Retrieval-Augmented Generation) chu�
 
 ```mermaid
 graph TD;
-    A["Tải tài liệu (PDF, DOCX, TXT)"] --> B("Document Processor (Chunking)");
-    B --> C{"Embedding Model (e5-small)"};
-    C --> D[("ChromaDB (Vector Store)")];
+    subgraph "Data Ingestion"
+        A["Tải tài liệu (PDF, DOCX, TXT)"] --> B("Document Processor (Advanced Chunking)");
+        B --> C{"Embedding Model (e5-small)"};
+        C --> D[("ChromaDB (Vector Store)")];
+    end
     
-    E["Người dùng đặt câu hỏi"] --> F{"Embedding Query"};
-    F -->|"Tìm kiếm Vector"| D;
-    D -->|"Top 5 Ngữ cảnh"| G("Local LLM (Qwen 2.5)");
-    G -->|"Trả lời + Trích dẫn"| H["Giao diện DocSearch"];
+    subgraph "Professional Mode RAG Pipeline"
+        E["Người dùng đặt câu hỏi"] --> Q{"Clarification Gate & Query Rewrite"};
+        Q -->|"Làm rõ & tối ưu truy vấn"| F{"Embedding Query"};
+        F -->|"Tìm kiếm Vector"| D;
+        D -->|"Top K Ngữ cảnh (K=5)"| G("Local LLM (Qwen 2.5)");
+        G -->|"Bản nháp trả lời"| S{"Self-Check (Kiểm tra ảo giác)"};
+        S -->|"Passed"| H["Giao diện DocSearch (Kèm Trích dẫn)"];
+        S -->|"Failed"| R["Thử lại (Strict Retry) / Fallback"];
+        R --> H;
+    end
 ```
 
 ## 🛠 Ngăn Xếp Công Nghệ (Tech Stack)
