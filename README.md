@@ -114,6 +114,8 @@ Phiên bản hiện tại đã được nâng cấp theo hướng production-rea
 
 Để chạy mặc định ở chế độ LLM + kiểm soát chất lượng:
 
+Sao chép `.env.example` thành `.env` rồi chỉnh nếu cần.
+
 ```env
 FASTEST_RESPONSE_MODE=0
 ENABLE_QUERY_REWRITE=1
