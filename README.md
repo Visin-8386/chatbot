@@ -195,7 +195,7 @@ SIMILARITY_THRESHOLD = 40 # Ngưỡng similarity tối thiểu để lọc thôn
 Chạy kiểm thử chunking regression:
 
 ```bash
-python test_chunking.py
+pytest -q test_chunking.py
 ```
 
 Smoke test nhanh LLM mode:
