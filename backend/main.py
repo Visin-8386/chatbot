@@ -12,6 +12,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from dotenv import load_dotenv
@@ -42,9 +43,19 @@ from backend.generator import (
     build_clarification_question,
     groundedness_score,
     generate_extractive_answer,
+    preload_models,
 )
 
 app = FastAPI(title="Company Document Chatbot", version="1.0.0")
+
+
+@app.on_event("startup")
+async def startup_preload():
+    """Preload LLM model at server start to avoid blocking the first request."""
+    print("[STARTUP] Preloading LLM model...")
+    await run_in_threadpool(preload_models)
+    print("[STARTUP] LLM model ready.")
+
 
 # CORS
 app.add_middleware(
@@ -144,14 +155,14 @@ async def search_documents(request: SearchRequest):
     rewrite_start = time.perf_counter()
     if ENABLE_QUERY_REWRITE:
         try:
-            rewritten_query = rewrite_query(request.query)
+            rewritten_query = await run_in_threadpool(rewrite_query, request.query)
         except Exception as e:
             print(f"Query rewrite error: {e}")
             rewritten_query = request.query.strip()
     timings_ms["rewrite"] = round((time.perf_counter() - rewrite_start) * 1000, 1)
 
     retrieve_start = time.perf_counter()
-    results = search(rewritten_query, request.top_k)
+    results = await run_in_threadpool(search, rewritten_query, request.top_k)
     timings_ms["retrieve"] = round((time.perf_counter() - retrieve_start) * 1000, 1)
 
     needs_clarification = False
@@ -194,21 +205,43 @@ async def search_documents(request: SearchRequest):
     generate_start = time.perf_counter()
     generation_mode = "extractive" if FASTEST_RESPONSE_MODE else "llm"
     if FASTEST_RESPONSE_MODE:
-        ai_result = generate_extractive_answer(results)
+        ai_result = await run_in_threadpool(generate_extractive_answer, results)
     else:
-        ai_result = generate_answer(request.query, results)
+        ai_result = await run_in_threadpool(generate_answer, request.query, results)
     timings_ms["generate"] = round((time.perf_counter() - generate_start) * 1000, 1)
 
     quality_score = None
+    self_check_status = "disabled"
     self_check_start = time.perf_counter()
     if ENABLE_SELF_CHECK and not FASTEST_RESPONSE_MODE:
+        self_check_status = "running"
         try:
-            quality_score = groundedness_score(ai_result["answer"], results)
+            answer_text = ai_result["answer"].split("\n\n📌 **Nguồn trích dẫn:**", 1)[0].strip()
+            quality_score = await run_in_threadpool(groundedness_score, answer_text, results)
             if quality_score < SELF_CHECK_MIN_GROUNDEDNESS:
-                ai_result = generate_answer(request.query, results, strict_mode=True)
-                quality_score = groundedness_score(ai_result["answer"], results)
+                print(f"[SELF-CHECK] Low groundedness ({quality_score:.3f}), retrying in strict mode.")
+                self_check_status = "strict_retry"
+
+                strict_result = await run_in_threadpool(generate_answer, request.query, results, True)
+                strict_answer_text = strict_result["answer"].split("\n\n📌 **Nguồn trích dẫn:**", 1)[0].strip()
+                strict_score = await run_in_threadpool(groundedness_score, strict_answer_text, results)
+
+                if strict_score >= quality_score:
+                    ai_result = strict_result
+                    quality_score = strict_score
+                    self_check_status = "strict_retry_passed"
+                else:
+                    fallback_result = await run_in_threadpool(generate_extractive_answer, results)
+                    fallback_answer_text = fallback_result["answer"].split("\n\n📌 **Nguồn trích dẫn:**", 1)[0].strip()
+                    fallback_score = await run_in_threadpool(groundedness_score, fallback_answer_text, results)
+                    ai_result = fallback_result
+                    quality_score = fallback_score
+                    self_check_status = "extractive_fallback"
+            else:
+                self_check_status = "passed"
         except Exception as e:
             print(f"Self-check error: {e}")
+            self_check_status = "error"
     timings_ms["self_check"] = round((time.perf_counter() - self_check_start) * 1000, 1)
     timings_ms["total"] = round((time.perf_counter() - total_start) * 1000, 1)
 
@@ -218,6 +251,7 @@ async def search_documents(request: SearchRequest):
         "needs_clarification": needs_clarification,
         "clarification_question": clarification_question,
         "generation_mode": generation_mode,
+        "self_check_status": self_check_status,
         "quality_score": round(quality_score, 3) if quality_score is not None else None,
         "ai_answer": ai_result["answer"],
         "ai_sources": ai_result["sources"],

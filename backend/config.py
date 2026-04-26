@@ -28,6 +28,10 @@ EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 # Chunking
 CHUNK_SIZE = 800          # characters per chunk (optimized for Vietnamese)
 CHUNK_OVERLAP = 150       # overlap between chunks
+MIN_CHUNK_CHARS = int(os.getenv("MIN_CHUNK_CHARS", "120"))
+ENABLE_CHUNK_DEDUP = os.getenv("ENABLE_CHUNK_DEDUP", "1") == "1"
+MAX_CHUNKS_PER_SECTION = int(os.getenv("MAX_CHUNKS_PER_SECTION", "250"))
+PDF_MARGIN_REPEAT_RATIO = float(os.getenv("PDF_MARGIN_REPEAT_RATIO", "0.8"))
 
 # Generation context budget
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "2000"))
@@ -50,9 +54,9 @@ CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE",
 SELF_CHECK_MIN_GROUNDEDNESS = float(os.getenv("SELF_CHECK_MIN_GROUNDEDNESS", "0.35"))
 
 # Generation speed controls
-GENERATION_MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "64"))
+GENERATION_MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "256"))
 REWRITE_MAX_NEW_TOKENS = int(os.getenv("REWRITE_MAX_NEW_TOKENS", "24"))
-GENERATION_MAX_TIME_SEC = float(os.getenv("GENERATION_MAX_TIME_SEC", "18"))
+GENERATION_MAX_TIME_SEC = float(os.getenv("GENERATION_MAX_TIME_SEC", "30"))
 FASTEST_RESPONSE_MODE = os.getenv("FASTEST_RESPONSE_MODE", "1") == "1"
 
 # Upload limits

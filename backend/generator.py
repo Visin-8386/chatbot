@@ -18,6 +18,7 @@ MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 
 _tokenizer = None
 _model = None
+_tokenizer_lock = threading.Lock()
 _model_lock = threading.Lock()
 
 
@@ -25,7 +26,7 @@ def get_tokenizer() -> AutoTokenizer:
     """Load and cache the tokenizer on first use."""
     global _tokenizer
     if _tokenizer is None:
-        with _model_lock:
+        with _tokenizer_lock:
             if _tokenizer is None:
                 print("Loading tokenizer for local LLM...")
                 _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -43,13 +44,17 @@ def get_model() -> AutoModelForCausalLM:
                 print("First run will download ~3GB model from HuggingFace.")
                 print("Please wait...")
                 print("--------------------------------------------------")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
                 _model = AutoModelForCausalLM.from_pretrained(
                     MODEL_NAME,
                     dtype=torch.float16,
-                    device_map="auto"
+                    device_map=device
                 )
+                if torch.cuda.is_available():
+                    vram_mb = torch.cuda.memory_allocated() / 1024 / 1024
+                    print(f"[GPU] VRAM used: {vram_mb:.0f} MB")
                 print("--------------------------------------------------")
-                print("OK! Local LLM ready.")
+                print(f"OK! Local LLM ready on {device.upper()}.")
                 print("--------------------------------------------------")
     return _model
 
@@ -57,6 +62,12 @@ def get_model() -> AutoModelForCausalLM:
 def is_model_loaded() -> bool:
     """Return True when the LLM has already been initialized."""
     return _model is not None
+
+
+def preload_models():
+    """Preload tokenizer and model at startup to avoid lock contention during requests."""
+    get_tokenizer()
+    get_model()
 
 
 def _build_source_citation_text(sources_info: List[Dict]) -> str:
@@ -85,7 +96,7 @@ def _build_source_citation_text(sources_info: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def _run_chat(messages: List[Dict], max_new_tokens: int = 384, strict: bool = False) -> str:
+def _run_chat(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS, strict: bool = False) -> str:
     """Run local chat generation with stable defaults."""
     tokenizer = get_tokenizer()
     model = get_model()
