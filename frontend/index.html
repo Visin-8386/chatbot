@@ -8,9 +8,16 @@
     <link rel="stylesheet" href="/static/style.css?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Animated Background -->
+    <div class="background-effects">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+    
     <div class="app-container">
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
@@ -149,6 +156,11 @@
                         </button>
                     </div>
                 </div>
+                <div class="search-quick-actions" aria-label="Gợi ý câu hỏi nhanh">
+                    <button class="quick-suggestion" type="button" data-query="Quy trình xin nghỉ phép như thế nào?">Nghỉ phép</button>
+                    <button class="quick-suggestion" type="button" data-query="Quy định về danh số thiết bị là gì?">Danh số thiết bị</button>
+                    <button class="quick-suggestion" type="button" data-query="Hướng dẫn vận hành phần mạch trong tài liệu?">Phần mạch</button>
+                </div>
             </div>
 
             <!-- Results Area -->
@@ -174,6 +186,7 @@
                         </svg>
                         <h3>AI Tổng hợp</h3>
                     </div>
+                    <div class="ai-status-bar" id="aiStatusBar"></div>
                     <div class="ai-answer-content" id="aiAnswerContent"></div>
                     <div class="ai-citations" id="aiCitations"></div>
                 </div>
@@ -194,6 +207,10 @@
                     </svg>
                     <p>Không tìm thấy kết quả phù hợp</p>
                     <span>Thử tìm kiếm với từ khóa khác</span>
+                    <div class="empty-actions">
+                        <button class="quick-suggestion" type="button" data-query="Quy trình xin nghỉ phép như thế nào?">Nghỉ phép</button>
+                        <button class="quick-suggestion" type="button" data-query="Quy định về danh số thiết bị là gì?">Danh số thiết bị</button>
+                    </div>
                 </div>
             </div>
         </main>
