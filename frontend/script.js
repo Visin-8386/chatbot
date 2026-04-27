@@ -52,9 +52,18 @@ function showToast(message, type = 'info') {
 
 // === Search ===
 let searchTimeout = null;
+let chatSessionId = crypto.randomUUID();
+let chatHistory = [];
+
+function stripCitationSection(answerText) {
+    if (!answerText) return '';
+    const marker = '\n\n📌 **Nguồn trích dẫn:**';
+    return answerText.split(marker)[0].trim();
+}
 
 async function performSearch(query) {
     if (!query.trim()) return;
+    const cleanQuery = query.trim();
 
     // Minimize hero
     searchHero.classList.add('minimized');
@@ -82,7 +91,12 @@ async function performSearch(query) {
         const response = await fetch(`${API_BASE}/api/search`, {
             method: 'POST',
             headers: buildHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ query: query.trim(), top_k: 3 }),
+            body: JSON.stringify({
+                query: cleanQuery,
+                top_k: 3,
+                session_id: chatSessionId,
+                history: chatHistory
+            }),
             signal: controller.signal
         });
 
@@ -104,6 +118,11 @@ async function performSearch(query) {
                 .replace(/\n/g, '<br>');
             aiAnswerContent.innerHTML = formattedAnswer;
             renderCitations(data.ai_sources || [], data.results || []);
+            const assistantText = stripCitationSection(data.ai_answer);
+            chatHistory.push({ user: cleanQuery, assistant: assistantText });
+            if (chatHistory.length > 6) {
+                chatHistory = chatHistory.slice(-6);
+            }
         }
 
         if (!data.results || data.results.length === 0) {
@@ -113,7 +132,7 @@ async function performSearch(query) {
 
         // Show sources header
         resultsHeader.classList.remove('hidden');
-        renderResults(data.results, query.trim());
+        renderResults(data.results, cleanQuery);
     } catch (error) {
         loading.classList.add('hidden');
         if (error.name === 'AbortError') {
