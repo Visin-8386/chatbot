@@ -35,6 +35,7 @@ PDF_MARGIN_REPEAT_RATIO = float(os.getenv("PDF_MARGIN_REPEAT_RATIO", "0.8"))
 
 # Generation context budget
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "2000"))
+MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "6"))
 
 # Agentic-lite controls
 ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "0") == "1"
@@ -57,7 +58,7 @@ SELF_CHECK_MIN_GROUNDEDNESS = float(os.getenv("SELF_CHECK_MIN_GROUNDEDNESS", "0.
 GENERATION_MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "256"))
 REWRITE_MAX_NEW_TOKENS = int(os.getenv("REWRITE_MAX_NEW_TOKENS", "24"))
 GENERATION_MAX_TIME_SEC = float(os.getenv("GENERATION_MAX_TIME_SEC", "30"))
-FASTEST_RESPONSE_MODE = os.getenv("FASTEST_RESPONSE_MODE", "1") == "1"
+FASTEST_RESPONSE_MODE = os.getenv("FASTEST_RESPONSE_MODE", "0") == "1"
 
 # Upload limits
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))

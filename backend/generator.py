@@ -10,6 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import List, Dict
 from backend.config import (
     MAX_CONTEXT_CHARS,
+    MAX_HISTORY_TURNS,
     GENERATION_MAX_NEW_TOKENS,
     REWRITE_MAX_NEW_TOKENS,
     GENERATION_MAX_TIME_SEC,
@@ -54,7 +55,7 @@ def get_model() -> AutoModelForCausalLM:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 _model = AutoModelForCausalLM.from_pretrained(
                     MODEL_NAME,
-                    dtype=torch.float16,
+                    torch_dtype=torch.float16,
                     device_map=device
                 )
                 if hasattr(_model, "generation_config"):
@@ -202,6 +203,43 @@ def _tokenize(text: str) -> set:
     return {token for token in tokens if len(token) > 1 and token not in stopwords}
 
 
+def _is_follow_up_query(query: str) -> bool:
+    """Detect short pronoun-heavy follow-up queries that depend on prior context."""
+    normalized = query.strip().lower()
+    if not normalized:
+        return False
+    follow_up_markers = (
+        "vay", "vậy", "còn", "con", "thế", "neu", "nếu", "sao", "nhu vay",
+        "như vậy", "bo sung", "bổ sung", "tiep", "tiếp"
+    )
+    token_count = len(_tokenize(normalized))
+    marker_hit = any(marker in normalized for marker in follow_up_markers)
+    return marker_hit or token_count <= 4
+
+
+def select_relevant_history(query: str, history: List[Dict] | None) -> List[Dict]:
+    """
+    Keep history only when the new query is likely a follow-up.
+    This prevents old topics from biasing retrieval/generation.
+    """
+    normalized_history = _normalize_history(history)
+    if not normalized_history:
+        return []
+
+    if _is_follow_up_query(query):
+        return normalized_history
+
+    # Compare topic overlap with the most recent user turn.
+    latest_user_query = normalized_history[-1].get("user", "")
+    current_tokens = _tokenize(query)
+    latest_tokens = _tokenize(latest_user_query)
+    if not current_tokens or not latest_tokens:
+        return []
+
+    overlap_ratio = len(current_tokens.intersection(latest_tokens)) / len(current_tokens)
+    return normalized_history if overlap_ratio >= 0.25 else []
+
+
 def _prepare_context_and_sources(search_results: List[Dict], max_context_chars: int) -> Dict:
     """Keep the highest-ranked chunks until the context budget is reached."""
     context_parts = []
@@ -251,7 +289,41 @@ def _prepare_context_and_sources(search_results: List[Dict], max_context_chars: 
     }
 
 
-def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = False) -> Dict:
+def _normalize_history(history: List[Dict] | None) -> List[Dict]:
+    """Normalize incoming chat history and keep the most recent turns only."""
+    if not history:
+        return []
+    normalized = []
+    for turn in history[-MAX_HISTORY_TURNS:]:
+        if not isinstance(turn, dict):
+            continue
+        user_text = str(turn.get("user", "")).strip()
+        assistant_text = str(turn.get("assistant", "")).strip()
+        if not user_text and not assistant_text:
+            continue
+        normalized.append({
+            "user": user_text,
+            "assistant": assistant_text
+        })
+    return normalized
+
+
+def _build_history_text(history: List[Dict]) -> str:
+    """Build compact dialogue history text for the prompt."""
+    if not history:
+        return "Không có hội thoại trước đó."
+
+    lines = []
+    for idx, turn in enumerate(history, start=1):
+        user_text = turn.get("user", "")
+        assistant_text = turn.get("assistant", "")
+        lines.append(f"Lượt {idx} - Người dùng: {user_text}")
+        if assistant_text:
+            lines.append(f"Lượt {idx} - Trợ lý: {assistant_text}")
+    return "\n".join(lines)
+
+
+def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = False, history: List[Dict] | None = None) -> Dict:
     """
     Generate answer using local Qwen 2.5 model based on retrieved context chunks.
     Always appends source citations to the answer.
@@ -268,18 +340,25 @@ def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = 
     prepared = _prepare_context_and_sources(search_results, MAX_CONTEXT_CHARS)
     context_text = prepared["context_text"]
     sources_info = prepared["sources_info"]
+    normalized_history = _normalize_history(history)
+    history_text = _build_history_text(normalized_history)
 
     # Simplified prompt — small models work better with direct instructions
     system_msg = (
         "Bạn là trợ lý AI nội bộ của công ty. "
         "Trả lời câu hỏi dựa trên tài liệu được cung cấp. "
+        "Có thể tham chiếu hội thoại trước đó để hiểu ngữ cảnh câu hỏi hiện tại. "
         "Chỉ dùng thông tin có trong tài liệu. "
         "Nếu tài liệu không đủ dữ kiện để kết luận, phải nói rõ 'Không tìm thấy thông tin trong tài liệu được cung cấp'. "
         "Không suy diễn ngoài tài liệu. "
         "Trả lời bằng tiếng Việt, ngắn gọn, rõ ràng."
     )
 
-    user_msg = f"TÀI LIỆU:\n{context_text}\n\nCÂU HỎI: {query}"
+    user_msg = (
+        f"HỘI THOẠI GẦN ĐÂY:\n{history_text}\n\n"
+        f"TÀI LIỆU:\n{context_text}\n\n"
+        f"CÂU HỎI HIỆN TẠI: {query}"
+    )
 
     messages = [
         {"role": "system", "content": system_msg},

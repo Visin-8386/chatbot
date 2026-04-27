@@ -16,7 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from dotenv import load_dotenv
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 from backend.config import (
     UPLOAD_DIR,
@@ -43,6 +43,7 @@ from backend.generator import (
     build_clarification_question,
     groundedness_score,
     generate_extractive_answer,
+    select_relevant_history,
     preload_models,
 )
 
@@ -81,6 +82,8 @@ async def verify_api_key(x_api_key: Optional[str] = Header(default=None)) -> Non
 class SearchRequest(BaseModel):
     query: str
     top_k: Optional[int] = TOP_K
+    session_id: Optional[str] = None
+    history: Optional[list[dict[str, str]]] = None
 
 
 # --- API Endpoints ---
@@ -201,13 +204,16 @@ async def search_documents(request: SearchRequest):
                 }
             }
 
+    # Reduce context drift: drop old history when query shifts topic.
+    effective_history = select_relevant_history(request.query, request.history)
+
     # Generate answer using fastest mode or LLM mode
     generate_start = time.perf_counter()
     generation_mode = "extractive" if FASTEST_RESPONSE_MODE else "llm"
     if FASTEST_RESPONSE_MODE:
         ai_result = await run_in_threadpool(generate_extractive_answer, results)
     else:
-        ai_result = await run_in_threadpool(generate_answer, request.query, results)
+        ai_result = await run_in_threadpool(generate_answer, request.query, results, False, effective_history)
     timings_ms["generate"] = round((time.perf_counter() - generate_start) * 1000, 1)
 
     quality_score = None
@@ -222,7 +228,7 @@ async def search_documents(request: SearchRequest):
                 print(f"[SELF-CHECK] Low groundedness ({quality_score:.3f}), retrying in strict mode.")
                 self_check_status = "strict_retry"
 
-                strict_result = await run_in_threadpool(generate_answer, request.query, results, True)
+                strict_result = await run_in_threadpool(generate_answer, request.query, results, True, effective_history)
                 strict_answer_text = strict_result["answer"].split("\n\n📌 **Nguồn trích dẫn:**", 1)[0].strip()
                 strict_score = await run_in_threadpool(groundedness_score, strict_answer_text, results)
 
@@ -247,6 +253,7 @@ async def search_documents(request: SearchRequest):
 
     return {
         "query": request.query,
+        "session_id": request.session_id,
         "rewritten_query": rewritten_query,
         "needs_clarification": needs_clarification,
         "clarification_question": clarification_question,
