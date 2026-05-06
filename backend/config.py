@@ -25,6 +25,10 @@ def _parse_csv_env(name: str, default: List[str]) -> List[str]:
 # Embedding Model
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
+# LLM Model
+LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+LLM_LOAD_IN_4BIT = os.getenv("LLM_LOAD_IN_4BIT", "1") == "1"
+
 # Chunking
 CHUNK_SIZE = 800          # characters per chunk (optimized for Vietnamese)
 CHUNK_OVERLAP = 150       # overlap between chunks

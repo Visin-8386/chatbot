@@ -19,9 +19,13 @@ from backend.config import (
     GENERATION_MAX_NEW_TOKENS,
     REWRITE_MAX_NEW_TOKENS,
     GENERATION_MAX_TIME_SEC,
+    LLM_MODEL,
+    LLM_LOAD_IN_4BIT,
 )
+from transformers import BitsAndBytesConfig
 
-MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
+# Use model from config
+MODEL_NAME = LLM_MODEL
 
 _tokenizer = None
 _model = None
@@ -55,17 +59,35 @@ def get_model() -> AutoModelForCausalLM:
     if _model is None:
         with _model_lock:
             if _model is None:
-                logger.info("Initializing Local LLM ({}) in float16...", MODEL_NAME)
                 device = "cuda" if torch.cuda.is_available() else "cpu"
+                
+                # Setup quantization config if requested
+                quant_config = None
+                load_dtype = torch.float16
+                
+                if LLM_LOAD_IN_4BIT and device == "cuda":
+                    logger.info("Initializing Local LLM ({}) in 4-bit (NF4) mode...", MODEL_NAME)
+                    quant_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.float16,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                    )
+                else:
+                    logger.info("Initializing Local LLM ({}) in float16 mode...", MODEL_NAME)
+
                 _model = AutoModelForCausalLM.from_pretrained(
                     MODEL_NAME,
-                    torch_dtype=torch.float16,
-                    device_map=device
+                    quantization_config=quant_config,
+                    torch_dtype=load_dtype,
+                    device_map="auto" if device == "cuda" else "cpu"
                 )
+                
                 if hasattr(_model, "generation_config"):
                     _model.generation_config.temperature = None
                     _model.generation_config.top_p = None
                     _model.generation_config.top_k = None
+                
                 if torch.cuda.is_available():
                     vram_mb = torch.cuda.memory_allocated() / 1024 / 1024
                     logger.info("[GPU] VRAM used: {:.0f} MB", vram_mb)

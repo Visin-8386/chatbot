@@ -29,6 +29,8 @@ wheels/
 data/chroma_db/
 uploads/
 test_data/
+logs/
+*.pkl
 
 # OS specific
 .DS_Store
