@@ -360,17 +360,11 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 @app.get("/")
 async def serve_index():
     index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if not os.path.exists(index_path):
+        return HTMLResponse(content="<h1>Frontend index.html not found</h1>", status_code=404)
     with open(index_path, "r", encoding="utf-8") as f:
-        html = f.read()
-
-    config = {
-        "apiKey": API_KEY,
-        "uploadLimitMb": MAX_UPLOAD_BYTES // (1024 * 1024),
-        "apiAuthEnabled": bool(API_KEY)
-    }
-    config_script = f"<script>window.__DOCSEARCH_CONFIG__ = {json.dumps(config, ensure_ascii=False)};</script>"
-    html = html.replace("</head>", f"    {config_script}\n</head>", 1)
-    return HTMLResponse(content=html)
+        return HTMLResponse(content=f.read())
 
 # Mount static files
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
