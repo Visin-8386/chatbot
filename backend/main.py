@@ -10,10 +10,11 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=False)
@@ -38,8 +39,10 @@ from backend.document_processor import process_document
 from backend.vector_store import add_documents, search, delete_document, get_all_documents, get_stats
 from backend.generator import (
     generate_answer,
+    generate_answer_stream,
     is_model_loaded,
     rewrite_query,
+    rerank_results,
     build_clarification_question,
     groundedness_score,
     generate_extractive_answer,
@@ -52,10 +55,10 @@ app = FastAPI(title="Company Document Chatbot", version="1.0.0")
 
 @app.on_event("startup")
 async def startup_preload():
-    """Preload LLM model at server start to avoid blocking the first request."""
-    print("[STARTUP] Preloading LLM model...")
+    """Preload models at server start."""
+    logger.info("[STARTUP] Preloading models (LLM, Reranker, Embedding)...")
     await run_in_threadpool(preload_models)
-    print("[STARTUP] LLM model ready.")
+    logger.info("[STARTUP] All models ready.")
 
 
 # CORS
@@ -165,8 +168,13 @@ async def search_documents(request: SearchRequest):
     timings_ms["rewrite"] = round((time.perf_counter() - rewrite_start) * 1000, 1)
 
     retrieve_start = time.perf_counter()
-    results = await run_in_threadpool(search, rewritten_query, request.top_k)
+    results = await run_in_threadpool(search, rewritten_query, request.top_k * 2) # Get more for reranking
     timings_ms["retrieve"] = round((time.perf_counter() - retrieve_start) * 1000, 1)
+
+    # Reranking
+    rerank_start = time.perf_counter()
+    results = await run_in_threadpool(rerank_results, rewritten_query, results, request.top_k)
+    timings_ms["rerank"] = round((time.perf_counter() - rerank_start) * 1000, 1)
 
     needs_clarification = False
     clarification_question = ""
@@ -266,6 +274,35 @@ async def search_documents(request: SearchRequest):
         "total": len(results),
         "timings_ms": timings_ms
     }
+
+
+@app.post("/api/search/stream", dependencies=[Depends(verify_api_key)])
+async def search_documents_stream(request: SearchRequest):
+    """Search and stream AI answer tokens."""
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    # 1. Rewrite
+    rewritten_query = request.query.strip()
+    if ENABLE_QUERY_REWRITE:
+        try:
+            rewritten_query = await run_in_threadpool(rewrite_query, request.query)
+        except Exception as e:
+            logger.error("Query rewrite error: {}", e)
+
+    # 2. Retrieve & Rerank
+    results = await run_in_threadpool(search, rewritten_query, request.top_k * 2)
+    results = await run_in_threadpool(rerank_results, rewritten_query, results, request.top_k)
+
+    # 3. History
+    effective_history = select_relevant_history(request.query, request.history)
+
+    # 4. Stream Response
+    def stream_generator():
+        for chunk in generate_answer_stream(request.query, results, False, effective_history):
+            yield f"data: {chunk}\n\n"
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
 
 @app.get("/api/documents", dependencies=[Depends(verify_api_key)])

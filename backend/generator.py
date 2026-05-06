@@ -6,8 +6,13 @@ import torch
 import threading
 import re
 import warnings
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import List, Dict
+import json
+from datetime import datetime
+from typing import List, Dict, Generator, Optional
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from sentence_transformers import CrossEncoder
+from loguru import logger
+
 from backend.config import (
     MAX_CONTEXT_CHARS,
     MAX_HISTORY_TURNS,
@@ -29,6 +34,9 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
+# Setup Logger
+logger.add("logs/backend.log", rotation="10 MB", format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
+
 
 def get_tokenizer() -> AutoTokenizer:
     """Load and cache the tokenizer on first use."""
@@ -36,7 +44,7 @@ def get_tokenizer() -> AutoTokenizer:
     if _tokenizer is None:
         with _tokenizer_lock:
             if _tokenizer is None:
-                print("Loading tokenizer for local LLM...")
+                logger.info("Loading tokenizer for local LLM: {}", MODEL_NAME)
                 _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     return _tokenizer
 
@@ -47,11 +55,7 @@ def get_model() -> AutoModelForCausalLM:
     if _model is None:
         with _model_lock:
             if _model is None:
-                print("--------------------------------------------------")
-                print("Initializing Local LLM (Qwen2.5-1.5B-Instruct) in float16...")
-                print("First run will download ~3GB model from HuggingFace.")
-                print("Please wait...")
-                print("--------------------------------------------------")
+                logger.info("Initializing Local LLM ({}) in float16...", MODEL_NAME)
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 _model = AutoModelForCausalLM.from_pretrained(
                     MODEL_NAME,
@@ -64,11 +68,26 @@ def get_model() -> AutoModelForCausalLM:
                     _model.generation_config.top_k = None
                 if torch.cuda.is_available():
                     vram_mb = torch.cuda.memory_allocated() / 1024 / 1024
-                    print(f"[GPU] VRAM used: {vram_mb:.0f} MB")
-                print("--------------------------------------------------")
-                print(f"OK! Local LLM ready on {device.upper()}.")
-                print("--------------------------------------------------")
+                    logger.info("[GPU] VRAM used: {:.0f} MB", vram_mb)
+                logger.info("Local LLM ready on {}.", device.upper())
     return _model
+
+
+_reranker = None
+_reranker_lock = threading.Lock()
+
+def get_reranker() -> CrossEncoder:
+    """Load and cache the reranker model (BGE Reranker)."""
+    global _reranker
+    if _reranker is None:
+        with _reranker_lock:
+            if _reranker is None:
+                model_name = "BAAI/bge-reranker-base"
+                logger.info("Loading Reranker: {}", model_name)
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                _reranker = CrossEncoder(model_name, device=device)
+                logger.info("Reranker ready on {}.", device.upper())
+    return _reranker
 
 
 def is_model_loaded() -> bool:
@@ -77,9 +96,10 @@ def is_model_loaded() -> bool:
 
 
 def preload_models():
-    """Preload tokenizer and model at startup to avoid lock contention during requests."""
+    """Preload tokenizer, LLM, and Reranker at startup."""
     get_tokenizer()
     get_model()
+    get_reranker()
 
 
 def _build_source_citation_text(sources_info: List[Dict]) -> str:
@@ -109,15 +129,11 @@ def _build_source_citation_text(sources_info: List[Dict]) -> str:
 
 
 def _run_chat(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS, strict: bool = False) -> str:
-    """Run local chat generation with stable defaults."""
+    """Run local chat generation (synchronous)."""
     tokenizer = get_tokenizer()
     model = get_model()
 
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
     with torch.no_grad():
@@ -133,6 +149,32 @@ def _run_chat(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOK
     return tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
 
+def _run_chat_stream(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS) -> Generator[str, None, None]:
+    """Run local chat generation with streaming tokens."""
+    tokenizer = get_tokenizer()
+    model = get_model()
+
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    
+    generation_kwargs = dict(
+        **model_inputs,
+        streamer=streamer,
+        max_new_tokens=max_new_tokens,
+        max_time=GENERATION_MAX_TIME_SEC,
+        do_sample=False,
+        repetition_penalty=1.1
+    )
+
+    thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+    thread.start()
+
+    for new_text in streamer:
+        yield new_text
+
+
 def rewrite_query(query: str) -> str:
     """Rewrite user query into a concise retrieval-friendly query."""
     clean_query = query.strip()
@@ -145,17 +187,41 @@ def rewrite_query(query: str) -> str:
         "Trả về đúng một câu truy vấn, không giải thích."
     )
     user_msg = f"Truy vấn gốc: {clean_query}"
-    rewritten = _run_chat(
-        [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg}
-        ],
-        max_new_tokens=REWRITE_MAX_NEW_TOKENS,
-        strict=True
-    )
+    try:
+        rewritten = _run_chat(
+            [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg}
+            ],
+            max_new_tokens=REWRITE_MAX_NEW_TOKENS,
+            strict=True
+        )
+        rewritten = rewritten.splitlines()[0].strip() if rewritten else clean_query
+        return rewritten or clean_query
+    except Exception as e:
+        logger.error("Query rewrite error: {}", e)
+        return clean_query
 
-    rewritten = rewritten.splitlines()[0].strip() if rewritten else clean_query
-    return rewritten or clean_query
+
+def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict]:
+    """Re-rank retrieved results using a Cross-Encoder for better accuracy."""
+    if not results or len(results) <= 1:
+        return results
+
+    reranker = get_reranker()
+    pairs = [[query, r["text"]] for r in results]
+    
+    scores = reranker.predict(pairs)
+    
+    # Update scores and sort
+    for i, res in enumerate(results):
+        # Normalize score to 0-100 range roughly
+        res["rerank_score"] = float(scores[i])
+        # Update similarity if needed or keep separate
+        res["similarity"] = round(float(torch.sigmoid(torch.tensor(scores[i])).item()) * 100, 1)
+
+    results.sort(key=lambda x: x["rerank_score"], reverse=True)
+    return results[:top_n]
 
 
 def build_clarification_question(original_query: str, search_results: List[Dict]) -> str:
@@ -383,11 +449,61 @@ def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = 
         }
 
     except Exception as e:
-        print(f"LLM Generation Error: {e}")
+        logger.error("LLM Generation Error: {}", e)
         return {
             "answer": "Xin lỗi, đã có lỗi khi tạo câu trả lời. Vui lòng đọc trực tiếp các đoạn văn bản dưới." + citation_text,
             "sources": sources_info
         }
+
+
+def generate_answer_stream(query: str, search_results: List[Dict], strict_mode: bool = False, history: List[Dict] | None = None) -> Generator[str, None, None]:
+    """
+    Generate streaming answer using local Qwen 2.5 model.
+    Yields JSON chunks for SSE.
+    """
+    if not search_results:
+        yield json.dumps({"answer": "Không tìm thấy thông tin liên quan.", "done": True})
+        return
+
+    prepared = _prepare_context_and_sources(search_results, MAX_CONTEXT_CHARS)
+    context_text = prepared["context_text"]
+    sources_info = prepared["sources_info"]
+    normalized_history = _normalize_history(history)
+    history_text = _build_history_text(normalized_history)
+
+    system_msg = (
+        "Bạn là trợ lý AI nội bộ của công ty. Trả lời dựa trên tài liệu cung cấp. "
+        "Chỉ dùng thông tin có trong tài liệu. Trả lời ngắn gọn, rõ ràng bằng tiếng Việt."
+    )
+    if strict_mode:
+        system_msg += " Chỉ trả lời đúng ý chính, không giải thích dài dòng."
+
+    user_msg = f"HỘI THOẠI GẦN ĐÂY:\n{history_text}\n\nTÀI LIỆU:\n{context_text}\n\nCÂU HỎI: {query}"
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_msg}
+    ]
+
+    citation_text = _build_source_citation_text(sources_info)
+    
+    # Send metadata first
+    yield json.dumps({
+        "type": "metadata",
+        "sources": sources_info,
+        "citation_text": citation_text
+    }) + "\n"
+
+    try:
+        full_response = ""
+        for token in _run_chat_stream(messages, max_new_tokens=GENERATION_MAX_NEW_TOKENS):
+            full_response += token
+            yield json.dumps({"type": "token", "token": token}) + "\n"
+        
+        yield json.dumps({"type": "done", "full_answer": full_response + citation_text}) + "\n"
+    except Exception as e:
+        logger.error("LLM Streaming Error: {}", e)
+        yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
 
 def generate_extractive_answer(search_results: List[Dict]) -> Dict:

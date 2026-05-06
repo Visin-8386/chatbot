@@ -421,10 +421,124 @@ def _infer_content_kind(text: str) -> str:
     return "paragraph"
 
 
+def _split_on_word_boundary(text: str, limit: int) -> List[str]:
+    """Split text at whitespace near the size limit to avoid breaking tokens."""
+    pieces: List[str] = []
+    cursor = 0
+    text_length = len(text)
+
+    while cursor < text_length:
+        end = min(cursor + limit, text_length)
+        if end >= text_length:
+            piece = text[cursor:].strip()
+            if piece:
+                pieces.append(piece)
+            break
+
+        split_at = text.rfind(" ", cursor, end)
+        if split_at <= cursor:
+            split_at = end
+
+        piece = text[cursor:split_at].strip()
+        if piece:
+            pieces.append(piece)
+        cursor = split_at
+        while cursor < text_length and text[cursor].isspace():
+            cursor += 1
+
+    return pieces
+
+
+def _split_table_block(unit: str, max_size: int) -> List[str]:
+    """Split a table-like block into row groups while repeating the header row."""
+    lines = [line.strip() for line in unit.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return lines or [unit]
+
+    header = lines[0]
+    data_rows = lines[1:]
+    if len(header) > max_size:
+        return _split_on_word_boundary(unit, max_size)
+
+    body_limit = max(1, max_size - len(header) - 1)
+
+    chunks: List[str] = []
+    current_rows: List[str] = [header]
+
+    for row in data_rows:
+        row_parts = [row] if len(row) <= body_limit else _split_on_word_boundary(row, body_limit)
+        for row_part in row_parts:
+            candidate_rows = current_rows + [row_part]
+            candidate_text = "\n".join(candidate_rows).strip()
+            if len(candidate_text) <= max_size:
+                current_rows = candidate_rows
+                continue
+
+            if len(current_rows) > 1:
+                chunks.append("\n".join(current_rows).strip())
+                current_rows = [header, row_part]
+                continue
+
+            # If the current chunk only has the header, force the row part to fit the body budget.
+            forced_parts = _split_on_word_boundary(row_part, body_limit)
+            if len(forced_parts) > 1:
+                for forced_part in forced_parts[:-1]:
+                    chunks.append("\n".join([header, forced_part]).strip())
+                current_rows = [header, forced_parts[-1]]
+                continue
+
+            chunks.append("\n".join([header, row_part]).strip())
+            current_rows = [header]
+
+    if current_rows:
+        chunks.append("\n".join(current_rows).strip())
+
+    return chunks
+
+
+def _split_list_block(unit: str, max_size: int) -> List[str]:
+    """Split a bullet list into coherent chunks without breaking items."""
+    lines = [line.strip() for line in unit.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return lines or [unit]
+
+    chunks: List[str] = []
+    current_lines: List[str] = []
+
+    for line in lines:
+        line_parts = [line] if len(line) <= max_size else _split_on_word_boundary(line, max_size)
+        for line_part in line_parts:
+            candidate_lines = current_lines + [line_part]
+            candidate_text = "\n".join(candidate_lines).strip()
+            if len(candidate_text) <= max_size or not current_lines:
+                current_lines = candidate_lines
+                continue
+
+            chunks.append("\n".join(current_lines).strip())
+            current_lines = [line_part]
+
+    if current_lines:
+        chunks.append("\n".join(current_lines).strip())
+
+    return chunks
+
+
 def _split_long_unit(unit: str, max_size: int) -> List[str]:
     """Split oversized text unit by sentence boundaries, fallback to hard split."""
     if len(unit) <= max_size:
         return [unit]
+
+    content_kind = _infer_content_kind(unit)
+
+    if content_kind == "table":
+        table_chunks = _split_table_block(unit, max_size)
+        if table_chunks:
+            return table_chunks
+
+    if content_kind == "list":
+        list_chunks = _split_list_block(unit, max_size)
+        if list_chunks:
+            return list_chunks
 
     if "\n" in unit:
         lines = [line.strip() for line in unit.splitlines() if line.strip()]
@@ -432,13 +546,15 @@ def _split_long_unit(unit: str, max_size: int) -> List[str]:
             split_lines = []
             current_line = ""
             for line in lines:
-                candidate = f"{current_line}\n{line}".strip() if current_line else line
-                if len(candidate) <= max_size:
-                    current_line = candidate
-                    continue
-                if current_line:
-                    split_lines.append(current_line)
-                current_line = line
+                line_parts = [line] if len(line) <= max_size else _split_on_word_boundary(line, max_size)
+                for line_part in line_parts:
+                    candidate = f"{current_line}\n{line_part}".strip() if current_line else line_part
+                    if len(candidate) <= max_size:
+                        current_line = candidate
+                        continue
+                    if current_line:
+                        split_lines.append(current_line)
+                    current_line = line_part
             if current_line:
                 split_lines.append(current_line)
             if split_lines:
@@ -446,7 +562,7 @@ def _split_long_unit(unit: str, max_size: int) -> List[str]:
 
     sentence_parts = [part.strip() for part in _SENTENCE_SPLIT_RE.split(unit) if part.strip()]
     if len(sentence_parts) <= 1:
-        return [unit[i:i + max_size].strip() for i in range(0, len(unit), max_size) if unit[i:i + max_size].strip()]
+        return _split_on_word_boundary(unit, max_size)
 
     result = []
     current = ""
@@ -461,7 +577,7 @@ def _split_long_unit(unit: str, max_size: int) -> List[str]:
         if len(sentence) <= max_size:
             current = sentence
         else:
-            hard_parts = [sentence[i:i + max_size].strip() for i in range(0, len(sentence), max_size) if sentence[i:i + max_size].strip()]
+            hard_parts = _split_on_word_boundary(sentence, max_size)
             result.extend(hard_parts[:-1])
             current = hard_parts[-1] if hard_parts else ""
 

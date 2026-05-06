@@ -1,3 +1,5 @@
+import re
+
 from backend.document_processor import (
     _collect_repeated_margin_signatures,
     _remove_repeated_margin_lines,
@@ -64,6 +66,33 @@ B | 20 | Can bo sung
     assert all(chunk.strip() for chunk in chunks)
     assert all(len(chunk) <= 175 for chunk in chunks)
     assert any("Bang tong hop | Gia tri | Ghi chu" in chunk for chunk in chunks)
+
+
+def test_chunk_text_keeps_word_boundaries() -> None:
+    sample = " ".join(f"word{i:02d}" for i in range(1, 41))
+
+    chunks = chunk_text(sample, chunk_size=80, overlap=20)
+
+    assert len(chunks) >= 3
+    assert all(re.fullmatch(r"(?:word\d{2}\s+)*word\d{2}", chunk.strip()) for chunk in chunks)
+
+
+def test_chunk_text_repeats_table_header() -> None:
+    sample = """Bang tong hop | Gia tri | Ghi chu
+A | 10 | Hop le
+B | 20 | Can bo sung
+C | 30 | Kiem tra lai rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat rat
+D | 40 | Da xac nhan
+E | 50 | Dang xu ly
+F | 60 | Hoan tat
+"""
+
+    chunks = chunk_text(sample, chunk_size=85, overlap=0)
+
+    assert len(chunks) >= 2
+    assert all(chunk.startswith("Bang tong hop | Gia tri | Ghi chu") for chunk in chunks)
+    assert all("\n" in chunk for chunk in chunks)
+    assert all(len(chunk) <= 85 for chunk in chunks)
 
 
 def main() -> None:

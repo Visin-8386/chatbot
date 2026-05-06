@@ -103,8 +103,9 @@ Hệ thống đã được benchmark trực tiếp trên cấu hình **NVIDIA RT
 Phiên bản hiện tại đã được nâng cấp theo hướng production-ready cho cả retrieval lẫn generation:
 
 - **Chunking nâng cao theo cấu trúc tài liệu**:
-  - Tách block ngữ nghĩa thay vì cắt thô theo ký tự.
-  - Giữ heading/list/table tốt hơn cho PDF, DOCX, XLSX, TXT.
+  - Tách theo block ngữ nghĩa thay vì cắt thô theo ký tự.
+  - Giữ nguyên ranh giới từ, ưu tiên heading/list/table như các đơn vị truy hồi riêng.
+  - Với bảng dài, lặp lại header ở mỗi chunk để giữ ngữ cảnh khi truy xuất.
   - Hỗ trợ gộp chunk quá ngắn và khử chunk trùng để giảm nhiễu truy xuất.
 - **Làm sạch PDF chuyên sâu**:
   - Loại bỏ header/footer lặp theo trang với ngưỡng bảo thủ.
