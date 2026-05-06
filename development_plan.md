@@ -15,7 +15,7 @@ Bản kế hoạch này tập trung vào việc khai thác tối đa sức mạn
 
 - [x] **1.1. Semantic Chunking:** Thay thế cách cắt văn bản theo số lượng ký tự bằng cách dùng mô hình Embedding để tìm điểm ngắt câu theo ngữ nghĩa. 
     - *Lợi ích:* Giữ trọn vẹn ý tưởng trong một chunk, không bị mất ngữ cảnh ở giữa câu.
-- [ ] **1.2. Hybrid Search (Dense + Sparse):** Kết hợp ChromaDB (Vector) với BM25 (Keyword Search).
+- [x] **1.2. Hybrid Search (Dense + Sparse):** Kết hợp ChromaDB (Vector) với BM25 (Keyword Search).
     - *Lợi ích:* Tìm chính xác các thuật ngữ chuyên môn, mã sản phẩm hoặc tên riêng mà Vector Search đôi khi bỏ lỡ.
 - [ ] **1.3. LLM Optimization (Quantization):** Chuyển sang sử dụng định dạng GGUF hoặc AWQ cho bản Qwen 7B.
     - *Lợi ích:* Đạt được trình độ suy luận của các model lớn nhưng vẫn chạy mượt trên 12GB VRAM của 3060.

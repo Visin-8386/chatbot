@@ -3,15 +3,18 @@ Vector Store - ChromaDB wrapper for document storage and retrieval.
 """
 import chromadb
 import re
-from typing import List, Dict
+import os
+import pickle
+from typing import List, Dict, Optional
 from chromadb.config import Settings
+from rank_bm25 import BM25Okapi
+from loguru import logger
+
 from backend.config import (
     CHROMA_DIR,
     TOP_K,
     SIMILARITY_THRESHOLD,
     RETRIEVAL_CANDIDATE_MULTIPLIER,
-    RERANK_EMBEDDING_WEIGHT,
-    RERANK_KEYWORD_WEIGHT,
 )
 from backend.embedding_service import embed_passages, embed_query
 
@@ -29,18 +32,66 @@ _STOPWORDS = {
 }
 
 
-def _tokenize(text: str) -> set:
+def _tokenize_for_bm25(text: str) -> List[str]:
+    """Tokenize text into a list of words for BM25."""
     tokens = re.findall(r"[\w\-]+", text.lower())
-    return {token for token in tokens if len(token) > 1 and token not in _STOPWORDS}
+    return [token for token in tokens if len(token) > 1 and token not in _STOPWORDS]
 
 
-def _keyword_overlap_score(query_tokens: set, text: str) -> float:
-    if not query_tokens:
-        return 0.0
-    text_tokens = _tokenize(text)
-    if not text_tokens:
-        return 0.0
-    return len(query_tokens.intersection(text_tokens)) / len(query_tokens)
+# Global state for BM25
+_bm25_index = None
+_bm25_docs = [] # Stores (text, metadata) pairs corresponding to index
+
+
+def _get_bm25_path():
+    return os.path.join(CHROMA_DIR, "bm25_index.pkl")
+
+
+def _initialize_bm25(force_rebuild: bool = False):
+    """Load BM25 from disk or build from ChromaDB."""
+    global _bm25_index, _bm25_docs
+    
+    path = _get_bm25_path()
+    if not force_rebuild and os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+                _bm25_index = data["index"]
+                _bm25_docs = data["docs"]
+                logger.info("Loaded BM25 index with {} chunks.", len(_bm25_docs))
+                return
+        except Exception as e:
+            logger.warning("Failed to load BM25 index: {}. Rebuilding...", e)
+
+    # Rebuild from ChromaDB
+    collection = get_collection()
+    if collection.count() == 0:
+        _bm25_index = None
+        _bm25_docs = []
+        return
+
+    logger.info("Building BM25 index from ChromaDB ({} chunks)...", collection.count())
+    all_data = collection.get(include=["documents", "metadatas"])
+    
+    docs = []
+    tokenized_corpus = []
+    for i in range(len(all_data["ids"])):
+        text = all_data["documents"][i]
+        meta = all_data["metadatas"][i]
+        docs.append({"text": text, "metadata": meta, "id": all_data["ids"][i]})
+        tokenized_corpus.append(_tokenize_for_bm25(text))
+    
+    if tokenized_corpus:
+        _bm25_index = BM25Okapi(tokenized_corpus)
+        _bm25_docs = docs
+        # Save to disk
+        os.makedirs(CHROMA_DIR, exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump({"index": _bm25_index, "docs": _bm25_docs}, f)
+        logger.info("BM25 index built and saved.")
+    else:
+        _bm25_index = None
+        _bm25_docs = []
 
 
 def get_collection():
@@ -55,6 +106,8 @@ def get_collection():
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"}
         )
+        # Initialize BM25 after collection is ready
+        _initialize_bm25()
     return _collection
 
 
@@ -96,15 +149,16 @@ def add_documents(chunks: List[Dict], doc_id: str) -> int:
         metadatas=metadatas
     )
 
+    # Rebuild BM25 to include new docs
+    _initialize_bm25(force_rebuild=True)
+
     return len(chunks)
 
 
 def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     """
-    Search for relevant document chunks.
-    
-    Returns:
-        List of results with text, metadata, and similarity score.
+    Search for relevant document chunks using Hybrid Search (Vector + BM25).
+    Combined via Reciprocal Rank Fusion (RRF).
     """
     collection = get_collection()
     effective_top_k = TOP_K if top_k is None else max(1, int(top_k))
@@ -112,49 +166,77 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     if collection.count() == 0:
         return []
 
-    candidate_count = min(
-        max(effective_top_k * RETRIEVAL_CANDIDATE_MULTIPLIER, effective_top_k),
-        collection.count()
-    )
-
+    # 1. Vector Search (Dense)
     query_embedding = embed_query(query)
-    query_tokens = _tokenize(query)
-
-    results = collection.query(
+    vector_results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=candidate_count,
+        n_results=min(collection.count(), 50), # Get candidates for fusion
         include=["documents", "metadatas", "distances"]
     )
 
-    formatted_results = []
-    if results and results["documents"]:
-        for i in range(len(results["documents"][0])):
-            distance = results["distances"][0][i]
-            # ChromaDB cosine distance: 0 = identical, 2 = opposite
-            # Convert to similarity score (0-100%)
+    # 2. BM25 Search (Sparse)
+    bm25_results_list = []
+    if _bm25_index:
+        tokenized_query = _tokenize_for_bm25(query)
+        # Get scores for all docs
+        bm25_scores = _bm25_index.get_scores(tokenized_query)
+        # Pair with docs and sort
+        scored_docs = []
+        for i, score in enumerate(bm25_scores):
+            if score > 0:
+                scored_docs.append((score, _bm25_docs[i]))
+        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        bm25_results_list = scored_docs[:50]
+
+    # 3. Reciprocal Rank Fusion (RRF)
+    # RRF combines rankings from different sources.
+    # Score = sum(1 / (rank + k)) where k=60 is standard.
+    k = 60
+    scores = {} # Key: doc_id, Value: {score, text, metadata, vector_sim}
+
+    # Process Vector Results
+    if vector_results and vector_results["ids"]:
+        for rank, doc_id in enumerate(vector_results["ids"][0]):
+            distance = vector_results["distances"][0][rank]
             similarity = max(0, (1 - distance / 2)) * 100
+            
+            if doc_id not in scores:
+                scores[doc_id] = {
+                    "score": 0,
+                    "text": vector_results["documents"][0][rank],
+                    "metadata": vector_results["metadatas"][0][rank],
+                    "similarity": similarity
+                }
+            scores[doc_id]["score"] += 1.0 / (rank + 1 + k)
 
-            # Filter out low-similarity results
-            if similarity < SIMILARITY_THRESHOLD:
-                continue
+    # Process BM25 Results
+    for rank, (bm25_score, doc_info) in enumerate(bm25_results_list):
+        doc_id = doc_info["id"]
+        if doc_id not in scores:
+            scores[doc_id] = {
+                "score": 0,
+                "text": doc_info["text"],
+                "metadata": doc_info["metadata"],
+                "similarity": 0.0 # Will be updated if also in vector results
+            }
+        scores[doc_id]["score"] += 1.0 / (rank + 1 + k)
 
-            keyword_score = _keyword_overlap_score(query_tokens, results["documents"][0][i])
-            rerank_score = (
-                RERANK_EMBEDDING_WEIGHT * (similarity / 100.0) +
-                RERANK_KEYWORD_WEIGHT * keyword_score
-            ) * 100
+    # 4. Final Ranking
+    final_results = list(scores.values())
+    # If a result was only in BM25, similarity is 0. 
+    # We don't filter by SIMILARITY_THRESHOLD here to allow keyword matches to surface.
+    final_results.sort(key=lambda x: x["score"], reverse=True)
 
-            formatted_results.append({
-                "text": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "similarity": round(similarity, 1),
-                "rerank_score": round(rerank_score, 1)
-            })
-
-    formatted_results.sort(key=lambda item: item["rerank_score"], reverse=True)
-    for item in formatted_results:
-        item.pop("rerank_score", None)
-    return formatted_results[:effective_top_k]
+    # Prepare output
+    formatted = []
+    for item in final_results[:effective_top_k]:
+        formatted.append({
+            "text": item["text"],
+            "metadata": item["metadata"],
+            "similarity": round(item["similarity"], 1)
+        })
+    
+    return formatted
 
 
 def delete_document(doc_id: str) -> int:
@@ -169,6 +251,8 @@ def delete_document(doc_id: str) -> int:
 
     if results["ids"]:
         collection.delete(ids=results["ids"])
+        # Rebuild BM25 after deletion
+        _initialize_bm25(force_rebuild=True)
         return len(results["ids"])
     return 0
 

@@ -1,0 +1,8 @@
+2026-05-06 21:37:41 | INFO | [STARTUP] Preloading models (LLM, Reranker, Embedding)...
+2026-05-06 21:37:41 | INFO | Loading tokenizer for local LLM: Qwen/Qwen2.5-1.5B-Instruct
+2026-05-06 21:37:45 | INFO | Initializing Local LLM (Qwen/Qwen2.5-1.5B-Instruct) in float16...
+2026-05-06 21:39:09 | INFO | [GPU] VRAM used: 2944 MB
+2026-05-06 21:39:09 | INFO | Local LLM ready on CUDA.
+2026-05-06 21:39:09 | INFO | Loading Reranker: BAAI/bge-reranker-base
+2026-05-06 21:39:42 | INFO | Reranker ready on CUDA.
+2026-05-06 21:39:42 | INFO | [STARTUP] All models ready.

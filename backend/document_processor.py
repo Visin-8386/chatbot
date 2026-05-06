@@ -665,64 +665,46 @@ def _build_chunks_from_units(units: List[str], chunk_size: int, overlap: int) ->
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
     """
     Split text into semantically coherent overlapping chunks.
-    Uses Semantic Chunking: detects breakpoints in context using embeddings.
+    Combines structural block splitting with semantic grouping.
     """
-    # 1. Basic cleaning and initial splitting into sentences
-    normalized = _normalize_text(text)
-    if not normalized:
-        return []
-        
-    # Split into sentences conservatively
-    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(normalized) if s.strip()]
-    if len(sentences) <= 1:
-        return [normalized] if normalized else []
-
-    # 2. Get embeddings for sentences to detect semantic shifts
-    try:
-        model = get_embed_model()
-        # Prefix for E5 model
-        prefixed_sentences = [f"passage: {s}" for s in sentences]
-        embeddings = model.encode(prefixed_sentences, normalize_embeddings=True, show_progress_bar=False)
-        similarities = get_cosine_similarities(embeddings)
-    except Exception as e:
-        logger.error(f"Semantic chunking embedding error: {e}. Falling back to basic chunking.")
-        return _basic_chunk_text(text, chunk_size, overlap)
-
-    # 3. Identify breakpoints (where similarity drops significantly)
-    # Threshold 0.8 is a good starting point for E5 models
-    threshold = 0.82 
-    breakpoints = [i for i, sim in enumerate(similarities) if sim < threshold]
-    
-    # 4. Group sentences into semantic units
-    semantic_units = []
-    current_unit = [sentences[0]]
-    for i in range(len(sentences) - 1):
-        if i in breakpoints:
-            semantic_units.append(" ".join(current_unit))
-            current_unit = [sentences[i+1]]
-        else:
-            current_unit.append(sentences[i+1])
-    if current_unit:
-        semantic_units.append(" ".join(current_unit))
-
-    # 5. Assemble units into final chunks within the size limit
-    # We use the existing building logic but on semantic units instead of raw blocks
-    raw_chunks = _build_chunks_from_units(semantic_units, chunk_size, overlap)
-    
-    return _post_process_chunks(raw_chunks, chunk_size, MIN_CHUNK_CHARS, ENABLE_CHUNK_DEDUP)
-
-
-def _basic_chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """Fallback traditional chunking."""
+    # 1. Get structural blocks (paragraphs, tables, lists)
     blocks = _split_into_blocks(text)
     if not blocks:
         return []
 
-    expanded_units: List[str] = []
-    for unit in blocks:
-        expanded_units.extend(_split_long_unit(unit, chunk_size))
+    # 2. If we have enough blocks, use semantic similarity to group them
+    if len(blocks) > 1:
+        try:
+            model = get_embed_model()
+            # Use a representative snippet for embedding if block is huge
+            prefixed_blocks = [f"passage: {b[:500]}" for b in blocks]
+            embeddings = model.encode(prefixed_blocks, normalize_embeddings=True, show_progress_bar=False)
+            similarities = get_cosine_similarities(embeddings)
+            
+            # Threshold for block-level shift
+            threshold = 0.75 
+            
+            semantic_units = []
+            current_unit = [blocks[0]]
+            for i in range(len(blocks) - 1):
+                if i < len(similarities) and similarities[i] < threshold:
+                    semantic_units.append("\n\n".join(current_unit))
+                    current_unit = [blocks[i+1]]
+                else:
+                    current_unit.append(blocks[i+1])
+            if current_unit:
+                semantic_units.append("\n\n".join(current_unit))
+            
+            units_to_build = semantic_units
+        except Exception as e:
+            logger.error(f"Semantic grouping error: {e}. Falling back to structural blocks.")
+            units_to_build = blocks
+    else:
+        units_to_build = blocks
 
-    raw_chunks = _build_chunks_from_units(expanded_units, chunk_size, overlap)
+    # 3. Assemble units into final chunks, ensuring size limits and structural integrity
+    raw_chunks = _build_chunks_from_units(units_to_build, chunk_size, overlap)
+    
     return _post_process_chunks(raw_chunks, chunk_size, MIN_CHUNK_CHARS, ENABLE_CHUNK_DEDUP)
 
 
