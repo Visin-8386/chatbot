@@ -20,6 +20,8 @@ from backend.config import (
     PDF_MARGIN_REPEAT_RATIO,
     SUPPORTED_EXTENSIONS,
 )
+from backend.embedding_service import get_model as get_embed_model, get_cosine_similarities
+from loguru import logger
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.!?;:។])\s+")
@@ -661,7 +663,57 @@ def _build_chunks_from_units(units: List[str], chunk_size: int, overlap: int) ->
 
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """Split text into semantically coherent overlapping chunks."""
+    """
+    Split text into semantically coherent overlapping chunks.
+    Uses Semantic Chunking: detects breakpoints in context using embeddings.
+    """
+    # 1. Basic cleaning and initial splitting into sentences
+    normalized = _normalize_text(text)
+    if not normalized:
+        return []
+        
+    # Split into sentences conservatively
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(normalized) if s.strip()]
+    if len(sentences) <= 1:
+        return [normalized] if normalized else []
+
+    # 2. Get embeddings for sentences to detect semantic shifts
+    try:
+        model = get_embed_model()
+        # Prefix for E5 model
+        prefixed_sentences = [f"passage: {s}" for s in sentences]
+        embeddings = model.encode(prefixed_sentences, normalize_embeddings=True, show_progress_bar=False)
+        similarities = get_cosine_similarities(embeddings)
+    except Exception as e:
+        logger.error(f"Semantic chunking embedding error: {e}. Falling back to basic chunking.")
+        return _basic_chunk_text(text, chunk_size, overlap)
+
+    # 3. Identify breakpoints (where similarity drops significantly)
+    # Threshold 0.8 is a good starting point for E5 models
+    threshold = 0.82 
+    breakpoints = [i for i, sim in enumerate(similarities) if sim < threshold]
+    
+    # 4. Group sentences into semantic units
+    semantic_units = []
+    current_unit = [sentences[0]]
+    for i in range(len(sentences) - 1):
+        if i in breakpoints:
+            semantic_units.append(" ".join(current_unit))
+            current_unit = [sentences[i+1]]
+        else:
+            current_unit.append(sentences[i+1])
+    if current_unit:
+        semantic_units.append(" ".join(current_unit))
+
+    # 5. Assemble units into final chunks within the size limit
+    # We use the existing building logic but on semantic units instead of raw blocks
+    raw_chunks = _build_chunks_from_units(semantic_units, chunk_size, overlap)
+    
+    return _post_process_chunks(raw_chunks, chunk_size, MIN_CHUNK_CHARS, ENABLE_CHUNK_DEDUP)
+
+
+def _basic_chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+    """Fallback traditional chunking."""
     blocks = _split_into_blocks(text)
     if not blocks:
         return []

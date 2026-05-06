@@ -44,5 +44,15 @@ def embed_query(query: str) -> List[float]:
     embedding = model.encode([prefixed_query], normalize_embeddings=True)
     end_time = time.time()
     
-    print(f"[EMBED] Query speed: {(end_time - start_time) * 1000:.2f} ms")
     return embedding[0].tolist()
+
+def get_cosine_similarities(embeddings: List[List[float]]) -> List[float]:
+    """Calculate cosine similarities between adjacent embeddings."""
+    import numpy as np
+    if len(embeddings) < 2:
+        return []
+    
+    embs = np.array(embeddings)
+    # Since embeddings are normalized, cosine similarity is just dot product
+    sims = np.sum(embs[:-1] * embs[1:], axis=1)
+    return sims.tolist()
