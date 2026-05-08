@@ -65,10 +65,13 @@ SIMILARITY_THRESHOLD = 40 # minimum similarity % to include in results
 RETRIEVAL_CANDIDATE_MULTIPLIER = int(os.getenv("RETRIEVAL_CANDIDATE_MULTIPLIER", "4"))
 RERANK_EMBEDDING_WEIGHT = float(os.getenv("RERANK_EMBEDDING_WEIGHT", "0.75"))
 RERANK_KEYWORD_WEIGHT = float(os.getenv("RERANK_KEYWORD_WEIGHT", "0.25"))
+# Truncate chunk text khi rerank: 300 chars (~60-80 tokens) đủ để judge relevance
+RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "300"))
 
-CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "56"))
+# Giảm từ 56->45: tài liệu kỹ thuật thường similarity thấp hơn tài liệu hành chính
+CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "45"))
 CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "4"))
-CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "80"))
+CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "75"))
 SELF_CHECK_MIN_GROUNDEDNESS = float(os.getenv("SELF_CHECK_MIN_GROUNDEDNESS", "0.35"))
 
 # Generation speed controls

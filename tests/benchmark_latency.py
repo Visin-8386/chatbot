@@ -363,7 +363,7 @@ if __name__ == "__main__":
         wall_ms = (time.perf_counter() - t0) * 1000
         wall_all.append(wall_ms)
         t = r.json().get("timings_ms", {}) if r.ok else {}
-        status = "✅" if r.ok else "❌"
+        status = "OK" if r.ok else "ERR"
         print(
             f"{status} {q[:48]:<48} {wall_ms:>6.0f}ms"
             f" {t.get('retrieve',0):>6.0f}ms"
