@@ -54,6 +54,7 @@ from backend.generator import (
     crag_check_relevance,
 )
 from backend.chat_memory import init_db, save_turn, get_history, delete_session, get_all_sessions
+from backend.intent_classifier import classify_intent, get_chitchat_response
 
 app = FastAPI(title="Company Document Chatbot", version="1.0.0")
 
@@ -164,6 +165,42 @@ async def search_documents(request: SearchRequest):
     total_start = time.perf_counter()
     timings_ms = {}
 
+    # ── 0. Intent Detection (rule-based, ~0ms) ──────────────────────────────
+    has_history = bool(
+        (ENABLE_PERSISTENT_MEMORY and request.session_id) or request.history
+    )
+    intent_result = classify_intent(request.query, has_history=has_history)
+    intent = intent_result["intent"]
+    timings_ms["intent"] = round((time.perf_counter() - total_start) * 1000, 1)
+    logger.debug("[Intent] {} — {}", intent, intent_result["reason"])
+
+    # ── Chitchat: bypass RAG hoàn toàn ──────────────────────────────────────
+    if intent == "chitchat":
+        chitchat_answer = get_chitchat_response(request.query)
+        # Lưu vào memory để maintain context
+        if ENABLE_PERSISTENT_MEMORY and request.session_id:
+            await run_in_threadpool(save_turn, request.session_id, request.query, chitchat_answer)
+        return {
+            "query": request.query,
+            "session_id": request.session_id,
+            "intent": "chitchat",
+            "rewritten_query": request.query,
+            "needs_clarification": False,
+            "clarification_question": "",
+            "crag_verdict": "skipped",
+            "generation_mode": "chitchat",
+            "self_check_status": "skipped",
+            "quality_score": None,
+            "ai_answer": chitchat_answer,
+            "ai_sources": [],
+            "results": [],
+            "total": 0,
+            "timings_ms": {**timings_ms, "total": round((time.perf_counter() - total_start) * 1000, 1)}
+        }
+
+    # ── Follow-up: relax clarification gate, force history ──────────────────
+    is_followup = (intent == "followup")
+
     rewritten_query = request.query.strip()
 
     # 1. Query Rewrite
@@ -198,7 +235,8 @@ async def search_documents(request: SearchRequest):
     needs_clarification = False
     clarification_question = ""
 
-    if ENABLE_CLARIFICATION_GATE:
+    # Follow-up: bỏ qua clarification gate vì người dùng đang hỏi tiếp, cứ generate
+    if ENABLE_CLARIFICATION_GATE and not is_followup:
         top_similarity = results[0]["similarity"] if results else 0
         second_similarity = results[1]["similarity"] if len(results) > 1 else 0
         margin = top_similarity - second_similarity
@@ -216,6 +254,8 @@ async def search_documents(request: SearchRequest):
 
             return {
                 "query": request.query,
+                "session_id": request.session_id,
+                "intent": intent,
                 "rewritten_query": rewritten_query,
                 "needs_clarification": True,
                 "clarification_question": clarification_question,
@@ -252,13 +292,13 @@ async def search_documents(request: SearchRequest):
                            "total": round((time.perf_counter() - total_start) * 1000, 1)}
         }
 
-    # Lấy history: ưu tiên từ Persistent Memory (2.3), fallback về request.history
+    # Lấy history: follow-up luôn include history, rag_query dùng smart selection
     effective_history = []
     if ENABLE_PERSISTENT_MEMORY and request.session_id:
         db_history = await run_in_threadpool(get_history, request.session_id)
-        effective_history = select_relevant_history(request.query, db_history)
+        effective_history = db_history if is_followup else select_relevant_history(request.query, db_history)
     elif request.history:
-        effective_history = select_relevant_history(request.query, request.history)
+        effective_history = request.history if is_followup else select_relevant_history(request.query, request.history)
 
     # Generate answer using fastest mode or LLM mode
     generate_start = time.perf_counter()
@@ -312,6 +352,7 @@ async def search_documents(request: SearchRequest):
     return {
         "query": request.query,
         "session_id": request.session_id,
+        "intent": intent,
         "rewritten_query": rewritten_query,
         "needs_clarification": needs_clarification,
         "clarification_question": clarification_question,
