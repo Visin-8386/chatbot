@@ -55,6 +55,7 @@ from backend.generator import (
 )
 from backend.chat_memory import init_db, save_turn, get_history, delete_session, get_all_sessions
 from backend.intent_classifier import classify_intent, get_chitchat_response
+from backend.trace_logger import log_trace
 
 app = FastAPI(title="Company Document Chatbot", version="1.0.0")
 
@@ -349,7 +350,7 @@ async def search_documents(request: SearchRequest):
         plain_answer = ai_result["answer"].split("\n\n\U0001f4cc", 1)[0].strip()
         await run_in_threadpool(save_turn, request.session_id, request.query, plain_answer)
 
-    return {
+    response_data = {
         "query": request.query,
         "session_id": request.session_id,
         "intent": intent,
@@ -366,6 +367,11 @@ async def search_documents(request: SearchRequest):
         "total": len(results),
         "timings_ms": timings_ms
     }
+    
+    # Ghi Trace để phục vụ Observability
+    await run_in_threadpool(log_trace, response_data.copy())
+    
+    return response_data
 
 
 @app.post("/api/search/stream", dependencies=[Depends(verify_api_key)])
