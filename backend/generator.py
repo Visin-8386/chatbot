@@ -204,7 +204,7 @@ def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict
     # Truncate text: 300 chars giữ đủ context để rerank nhưng giảm sequence length 65%
     # -> giảm inference time từ ~4-5s xuống <500ms
     from backend.config import RERANKER_MAX_CHARS
-    pairs = [[query, r["text"][:RERANKER_MAX_CHARS]] for r in results]
+    pairs = [[query, r.get("match_text", r["text"])[:RERANKER_MAX_CHARS]] for r in results]
 
     scores = reranker.predict(pairs, batch_size=len(pairs), show_progress_bar=False)
 

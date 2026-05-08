@@ -15,6 +15,7 @@ from backend.config import (
     TOP_K,
     SIMILARITY_THRESHOLD,
     RETRIEVAL_CANDIDATE_MULTIPLIER,
+    ENABLE_CONTEXT_EXPANSION,
 )
 from backend.embedding_service import embed_passages, embed_query
 
@@ -227,11 +228,69 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     # We don't filter by SIMILARITY_THRESHOLD here to allow keyword matches to surface.
     final_results.sort(key=lambda x: x["score"], reverse=True)
 
+    # 5. Context Expansion (Sliding Window)
+    top_items = final_results[:effective_top_k]
+    
+    if ENABLE_CONTEXT_EXPANSION and top_items:
+        # Collect IDs of adjacent chunks
+        adjacent_ids = set()
+        for item in top_items:
+            doc_id = item["metadata"].get("doc_id")
+            chunk_idx = item["metadata"].get("chunk_index")
+            if doc_id is not None and chunk_idx is not None:
+                try:
+                    idx = int(chunk_idx)
+                    if idx > 0:
+                        adjacent_ids.add(f"{doc_id}_chunk_{idx - 1}")
+                    adjacent_ids.add(f"{doc_id}_chunk_{idx + 1}")
+                except ValueError:
+                    pass
+        
+        # Fetch adjacent chunks in one batch
+        if adjacent_ids:
+            adjacent_data = collection.get(ids=list(adjacent_ids), include=["documents"])
+            adj_dict = {}
+            if adjacent_data and adjacent_data["ids"]:
+                for i, aid in enumerate(adjacent_data["ids"]):
+                    adj_dict[aid] = adjacent_data["documents"][i]
+            
+            # Merge text
+            for item in top_items:
+                doc_id = item["metadata"].get("doc_id")
+                chunk_idx = item["metadata"].get("chunk_index")
+                if doc_id is not None and chunk_idx is not None:
+                    try:
+                        idx = int(chunk_idx)
+                        prev_text = adj_dict.get(f"{doc_id}_chunk_{idx - 1}", "")
+                        next_text = adj_dict.get(f"{doc_id}_chunk_{idx + 1}", "")
+                        
+                        merged_parts = []
+                        if prev_text:
+                            merged_parts.append(prev_text)
+                        merged_parts.append(item["text"])
+                        if next_text:
+                            merged_parts.append(next_text)
+                            
+                        item["match_text"] = item["text"]
+                        item["text"] = "\n...\n".join(merged_parts)
+                    except ValueError:
+                        item["match_text"] = item["text"]
+                        pass
+        
+        # fallback cho các item không expand được
+        for item in top_items:
+            if "match_text" not in item:
+                item["match_text"] = item["text"]
+    else:
+        for item in top_items:
+            item["match_text"] = item["text"]
+
     # Prepare output
     formatted = []
-    for item in final_results[:effective_top_k]:
+    for item in top_items:
         formatted.append({
             "text": item["text"],
+            "match_text": item["match_text"],
             "metadata": item["metadata"],
             "similarity": round(item["similarity"], 1)
         })
