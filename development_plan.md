@@ -23,11 +23,11 @@ Bản kế hoạch này tập trung vào việc khai thác tối đa sức mạn
 ## 🧠 Giai đoạn 2: Nâng cấp trí tuệ hệ thống (Agentic RAG)
 *Mục tiêu: Giảm thiểu ảo giác (Hallucination) và xử lý câu hỏi phức tạp.*
 
-- [ ] **2.1. Query Expansion (HyDE):** LLM sẽ tạo ra một câu trả lời giả lập trước khi đi tìm kiếm thực tế.
+- [x] **2.1. Query Expansion (HyDE):** LLM sẽ tạo ra một câu trả lời giả lập trước khi đi tìm kiếm thực tế.
     - *Lợi ích:* Tăng khả năng khớp dữ liệu giữa câu hỏi người dùng và tài liệu chuyên môn.
-- [ ] **2.2. Self-Correction Loop (CRAG):** Thiết lập bước kiểm tra: "Tài liệu này có thực sự trả lời được câu hỏi không?".
+- [x] **2.2. Self-Correction Loop (CRAG):** Thiết lập bước kiểm tra: "Tài liệu này có thực sự trả lời được câu hỏi không?".
     - *Lợi ích:* Nếu tài liệu rác, LLM sẽ từ chối trả lời thay vì tạo ra thông tin sai lệch.
-- [ ] **2.3. Persistent Chat Memory:** Lưu lịch sử chat vào database (SQLite) để hỗ trợ hội thoại dài mà không làm tràn Context.
+- [x] **2.3. Persistent Chat Memory:** Lưu lịch sử chat vào database (SQLite) để hỗ trợ hội thoại dài mà không làm tràn Context.
 
 ## 🌐 Giai đoạn 3: Hệ thống chuyên nghiệp (Scale & Enterprise)
 *Mục tiêu: Đạt chuẩn SOTA và có khả năng ứng dụng thực tế cao.*
