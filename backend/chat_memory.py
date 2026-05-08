@@ -121,13 +121,20 @@ def get_all_sessions() -> List[Dict]:
     with _get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT session_id,
-                   COUNT(*) / 2  AS turn_count,
-                   MIN(created_at) AS started_at,
-                   MAX(created_at) AS last_active_at
-            FROM chat_turns
-            GROUP BY session_id
-            ORDER BY last_active_at DESC
+            SELECT s.session_id,
+                   s.turn_count,
+                   s.started_at,
+                   s.last_active_at,
+                   (SELECT content FROM chat_turns WHERE session_id = s.session_id AND role = 'user' ORDER BY created_at DESC LIMIT 1) as last_query
+            FROM (
+                SELECT session_id,
+                       COUNT(*) / 2  AS turn_count,
+                       MIN(created_at) AS started_at,
+                       MAX(created_at) AS last_active_at
+                FROM chat_turns
+                GROUP BY session_id
+            ) s
+            ORDER BY s.last_active_at DESC
             """
         ).fetchall()
     return [dict(r) for r in rows]

@@ -3,142 +3,557 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DocSearch Lite - AI RAG Pipeline</title>
+    <title>DocSearch Enterprise - Agentic RAG</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#4f46e5',
+                        dark: '#0f172a',
+                        darker: '#020617',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); }
-        .stream-cursor::after { content: '|'; animation: blink 1s infinite; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-        pre { background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.875rem; }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #334155; }
+        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.2); }
+        .dark-glass { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(12px); }
+        
+        /* Markdown Styles */
+        .prose p { margin-bottom: 0.75em; line-height: 1.6; }
+        .prose h1, .prose h2, .prose h3 { font-weight: 600; margin-top: 1.5em; margin-bottom: 0.5em; color: #1e293b; }
+        .prose ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+        .prose ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 1em; }
+        .prose strong { font-weight: 600; color: #0f172a; }
+        .prose code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.875em; color: #ef4444; font-family: monospace; }
+        .prose pre { background: #1e293b; padding: 1em; border-radius: 8px; overflow-x: auto; margin-bottom: 1em; }
+        .prose pre code { background: transparent; color: #e2e8f0; }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Animations */
+        .typing-indicator::after { content: '▋'; animation: blink 1s step-start infinite; color: #6366f1; }
+        @keyframes blink { 50% { opacity: 0; } }
+        
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Loader */
+        .loader { border: 2px solid #e2e8f0; border-top-color: #6366f1; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; display: inline-block; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body className="h-screen flex flex-col">
-    <!-- Header -->
-    <header class="border-b bg-white/80 backdrop-blur-md sticky top-0 z-10 px-6 py-4 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">D</div>
-            <h1 class="text-xl font-bold tracking-tight text-slate-800">DocSearch <span class="text-indigo-600">Model Test</span></h1>
-        </div>
-        <div id="status" class="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded-full">Ready</div>
-    </header>
+<body class="h-screen w-screen flex overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
 
-    <!-- Chat Area -->
-    <main id="chat-container" class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 max-w-4xl mx-auto w-full">
-        <div class="text-center py-20">
-            <h2 class="text-2xl font-bold text-slate-700">Thử nghiệm RAG Pipeline</h2>
-            <p class="text-slate-500 mt-2">Streaming + Reranking + Local LLM</p>
+    <!-- Sidebar -->
+    <aside class="w-72 bg-dark text-slate-300 flex flex-col h-full shrink-0 shadow-2xl z-20 relative">
+        <div class="p-5 border-b border-slate-800/50 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/30 text-white font-bold text-lg">
+                    <i class="fa-solid fa-brain"></i>
+                </div>
+                <h1 class="text-xl font-bold text-white tracking-tight">DocSearch</h1>
+            </div>
         </div>
-    </main>
 
-    <!-- Input Area -->
-    <footer class="border-t bg-white p-4">
-        <div class="max-w-4xl mx-auto flex gap-3">
-            <textarea id="input" placeholder="Hỏi về tài liệu..." class="flex-1 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none h-14"></textarea>
-            <button id="send-btn" class="bg-indigo-600 text-white px-6 rounded-xl font-semibold hover:bg-indigo-700 transition-all disabled:opacity-50">
-                Gửi
+        <div class="p-4">
+            <button onclick="createNewSession()" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20">
+                <i class="fa-solid fa-plus text-sm"></i> Chat Mới
             </button>
         </div>
-    </footer>
+
+        <!-- Scrollable Sidebar Content -->
+        <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-6">
+            
+            <!-- Chat History -->
+            <div>
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 px-1">Lịch sử hội thoại</h2>
+                <div id="sessions-list" class="space-y-1">
+                    <!-- Sessions will be loaded here -->
+                    <div class="text-xs text-slate-500 text-center py-2"><span class="loader"></span></div>
+                </div>
+            </div>
+
+            <!-- Documents -->
+            <div>
+                <div class="flex items-center justify-between px-1 mb-3">
+                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Kho tài liệu</h2>
+                    <span id="doc-count" class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">0</span>
+                </div>
+                <div id="docs-list" class="space-y-1 mb-3">
+                    <!-- Docs will be loaded here -->
+                </div>
+                
+                <!-- Upload Area -->
+                <div class="relative group">
+                    <input type="file" id="file-upload" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" accept=".pdf,.txt,.docx,.xlsx">
+                    <div class="border-2 border-dashed border-slate-700 rounded-lg p-4 text-center group-hover:border-indigo-500 group-hover:bg-slate-800/50 transition-colors">
+                        <i class="fa-solid fa-cloud-arrow-up text-slate-400 group-hover:text-indigo-400 mb-2 text-lg"></i>
+                        <p class="text-xs text-slate-400 group-hover:text-slate-300">Nhấp hoặc kéo thả file<br><span class="text-[10px] text-slate-500">PDF, DOCX, TXT, XLSX</span></p>
+                    </div>
+                </div>
+                <div id="upload-status" class="text-xs mt-2 text-center text-emerald-400 hidden"></div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="p-4 border-t border-slate-800/50 bg-darker/50 text-xs text-slate-500 flex justify-between items-center">
+            <span>Agentic RAG Engine</span>
+            <div class="flex items-center gap-1.5">
+                <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span id="server-status">Online</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="flex-1 flex flex-col bg-slate-50/50 relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNlMmU4ZjAiLz48L3N2Zz4=')]">
+        
+        <!-- Top Navigation -->
+        <header class="h-16 glass border-b border-slate-200/60 flex items-center justify-between px-6 shrink-0 z-10">
+            <div class="flex items-center gap-3">
+                <span class="text-sm font-semibold text-slate-700" id="current-session-name">Chat Session</span>
+                <span class="text-xs px-2 py-1 bg-white border border-slate-200 rounded-md text-slate-500 shadow-sm" id="session-id-badge">New</span>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <button onclick="loadStats()" class="text-slate-400 hover:text-indigo-600 transition-colors" title="Làm mới dữ liệu">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Messages Area -->
+        <div id="chat-container" class="flex-1 overflow-y-auto p-6 scroll-smooth">
+            <div class="max-w-4xl mx-auto space-y-8 pb-20" id="messages-list">
+                
+                <!-- Welcome Message -->
+                <div class="flex justify-start fade-in" id="welcome-msg">
+                    <div class="flex gap-4 max-w-[85%]">
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shrink-0 shadow-md text-white text-xs">
+                            <i class="fa-solid fa-robot"></i>
+                        </div>
+                        <div class="bg-white border border-slate-200 shadow-sm rounded-2xl rounded-tl-none p-5">
+                            <h3 class="text-slate-800 font-semibold mb-2">Xin chào! 👋</h3>
+                            <p class="text-slate-600 text-sm leading-relaxed">
+                                Tôi là trợ lý AI tìm kiếm tài liệu nội bộ. Bạn có thể hỏi tôi bất cứ điều gì liên quan đến các tài liệu đã tải lên.<br>
+                                Tôi sử dụng <strong>Agentic RAG</strong> với khả năng mở rộng ngữ cảnh, Reranking và kiểm tra ảo giác để đảm bảo câu trả lời chính xác nhất.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-4 bg-white/80 backdrop-blur-md border-t border-slate-200/60 shrink-0">
+            <div class="max-w-4xl mx-auto relative">
+                <div class="absolute left-4 top-4 text-slate-400">
+                    <i class="fa-solid fa-sparkles"></i>
+                </div>
+                <textarea id="input" rows="1" placeholder="Nhập câu hỏi của bạn (Shift+Enter để xuống dòng)..." 
+                    class="w-full pl-12 pr-14 py-4 bg-white border border-slate-200 shadow-sm rounded-2xl focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none overflow-hidden transition-all text-sm"></textarea>
+                <button id="send-btn" class="absolute right-3 top-2.5 bottom-2.5 w-10 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fa-solid fa-paper-plane text-sm"></i>
+                </button>
+            </div>
+            <div class="max-w-4xl mx-auto text-center mt-2">
+                <p class="text-[10px] text-slate-400">AI có thể mắc sai lầm. Hãy luôn kiểm tra lại nguồn trích dẫn đính kèm.</p>
+            </div>
+        </div>
+
+    </main>
 
     <script>
+        // --- State ---
+        let currentSessionId = generateUUID();
+        let isGenerating = false;
+
+        // --- Elements ---
         const chatContainer = document.getElementById('chat-container');
+        const messagesList = document.getElementById('messages-list');
         const input = document.getElementById('input');
         const sendBtn = document.getElementById('send-btn');
-        const status = document.getElementById('status');
+        const fileUpload = document.getElementById('file-upload');
+        const uploadStatus = document.getElementById('upload-status');
+        const sessionsListEl = document.getElementById('sessions-list');
+        const docsListEl = document.getElementById('docs-list');
+        const sessionIdBadge = document.getElementById('session-id-badge');
+        const welcomeMsg = document.getElementById('welcome-msg');
 
-        async function handleSearch() {
-            const query = input.value.trim();
-            if (!query) return;
+        // --- Utils ---
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+        }
+
+        // Auto-resize textarea
+        input.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + 'px';
+        });
+
+        // --- Chat UI ---
+        function addMessageUser(text) {
+            welcomeMsg.style.display = 'none';
+            const div = document.createElement('div');
+            div.className = 'flex justify-end fade-in';
+            div.innerHTML = `
+                <div class="bg-indigo-600 text-white rounded-2xl rounded-tr-none px-5 py-3.5 max-w-[80%] shadow-md">
+                    <p class="text-sm whitespace-pre-wrap leading-relaxed">${escapeHtml(text)}</p>
+                </div>
+            `;
+            messagesList.appendChild(div);
+            scrollToBottom();
+        }
+
+        function createAssistantMessagePlaceholder() {
+            const div = document.createElement('div');
+            div.className = 'flex justify-start fade-in';
+            div.innerHTML = `
+                <div class="flex gap-4 max-w-[90%] w-full">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shrink-0 shadow-md text-white text-xs">
+                        <i class="fa-solid fa-robot"></i>
+                    </div>
+                    <div class="w-full">
+                        <div class="bg-white border border-slate-200 shadow-sm rounded-2xl rounded-tl-none p-5 relative">
+                            <!-- Intent Badge Placeholder -->
+                            <div class="intent-badge absolute -top-3 -right-2 hidden"></div>
+                            
+                            <!-- Content -->
+                            <div class="prose prose-sm max-w-none text-slate-700 markdown-content typing-indicator">Đang suy nghĩ...</div>
+                            
+                            <!-- Meta Area (hidden initially) -->
+                            <div class="meta-area hidden mt-4 pt-4 border-t border-slate-100 flex flex-col gap-3">
+                                <!-- Sources -->
+                                <div class="sources-container hidden">
+                                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1"><i class="fa-solid fa-link"></i> Nguồn tham chiếu</p>
+                                    <div class="chips flex flex-wrap gap-1.5"></div>
+                                </div>
+                                <!-- Metrics -->
+                                <div class="metrics-container flex items-center gap-3 text-[10px] text-slate-400 font-medium"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            messagesList.appendChild(div);
+            scrollToBottom();
+            return div;
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+        function formatIntentBadge(intent, needsClarification) {
+            if (needsClarification) {
+                return `<span class="bg-amber-100 text-amber-700 border border-amber-200 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><i class="fa-solid fa-circle-question"></i> Clarification</span>`;
+            }
+            switch(intent) {
+                case 'chitchat': return `<span class="bg-emerald-100 text-emerald-700 border border-emerald-200 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><i class="fa-solid fa-comments"></i> Chitchat</span>`;
+                case 'followup': return `<span class="bg-blue-100 text-blue-700 border border-blue-200 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><i class="fa-solid fa-reply"></i> Follow-up</span>`;
+                case 'rag_query': return `<span class="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><i class="fa-solid fa-magnifying-glass"></i> RAG Search</span>`;
+                default: return '';
+            }
+        }
+
+        // --- Core Chat Logic ---
+        async function sendMessage() {
+            if (isGenerating) return;
+            const text = input.value.trim();
+            if (!text) return;
 
             input.value = '';
-            status.textContent = 'Processing...';
-            
-            // Add User Message
-            addMessage(query, 'user');
+            input.style.height = 'auto';
+            isGenerating = true;
+            sendBtn.disabled = true;
 
-            // Add Assistant Message Placeholder
-            const assistantMsgDiv = addMessage('', 'assistant');
-            const contentDiv = assistantMsgDiv.querySelector('.content');
-            contentDiv.classList.add('stream-cursor');
+            addMessageUser(text);
+            const msgEl = createAssistantMessagePlaceholder();
+            const contentEl = msgEl.querySelector('.markdown-content');
+            const metaEl = msgEl.querySelector('.meta-area');
+            const badgeEl = msgEl.querySelector('.intent-badge');
 
             try {
                 const response = await fetch('/api/search/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: query, history: [] })
+                    body: JSON.stringify({ query: text, session_id: currentSessionId })
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                sessionIdBadge.textContent = currentSessionId.substring(0,8);
+                loadSessions(); // Refresh sessions list in background
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let fullContent = '';
 
+                contentEl.innerText = ''; // Clear "Đang suy nghĩ..."
+
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
 
-                    const chunk = decoder.decode(value);
+                    const chunk = decoder.decode(value, { stream: true });
                     const lines = chunk.split('\n');
 
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.slice(6));
+                            const dataStr = line.slice(6).trim();
+                            if (!dataStr) continue;
+                            
+                            const data = JSON.parse(dataStr);
                             if (data.type === 'token') {
                                 fullContent += data.token;
-                                contentDiv.innerText = fullContent;
-                                chatContainer.scrollTop = chatContainer.scrollHeight;
+                                contentEl.innerHTML = marked.parse(fullContent);
+                                scrollToBottom();
                             } else if (data.type === 'metadata') {
-                                renderSources(assistantMsgDiv, data.sources);
+                                // Remove typing indicator
+                                contentEl.classList.remove('typing-indicator');
+                                
+                                // Render Badge
+                                badgeEl.innerHTML = formatIntentBadge(data.intent, data.needs_clarification);
+                                badgeEl.classList.remove('hidden');
+
+                                // Render Metrics & Sources
+                                metaEl.classList.remove('hidden');
+                                
+                                // Metrics
+                                const metricsHtml = `
+                                    <span title="Total Latency"><i class="fa-solid fa-stopwatch text-slate-300"></i> ${data.timings_ms.total}ms</span>
+                                    ${data.timings_ms.rerank ? `<span title="Rerank Latency"><i class="fa-solid fa-layer-group text-slate-300"></i> ${data.timings_ms.rerank}ms</span>` : ''}
+                                    ${data.quality_score ? `<span title="Quality Score" class="text-emerald-500"><i class="fa-solid fa-check-double"></i> ${data.quality_score}/10</span>` : ''}
+                                `;
+                                msgEl.querySelector('.metrics-container').innerHTML = metricsHtml;
+
+                                // Sources
+                                if (data.sources && data.sources.length > 0) {
+                                    const srcContainer = msgEl.querySelector('.sources-container');
+                                    srcContainer.classList.remove('hidden');
+                                    msgEl.querySelector('.chips').innerHTML = data.sources.map(s => `
+                                        <div class="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-[10px] text-slate-600 truncate max-w-[200px] cursor-help" title="${s.text.replace(/"/g, '&quot;')}">
+                                            <i class="fa-solid fa-file-lines text-indigo-400 mr-1"></i>
+                                            ${s.file} ${s.page ? `(Trang ${s.page})` : ''}
+                                        </div>
+                                    `).join('');
+                                }
+                                scrollToBottom();
                             } else if (data.type === 'done') {
-                                contentDiv.classList.remove('stream-cursor');
-                                status.textContent = 'Ready';
+                                isGenerating = false;
+                                sendBtn.disabled = false;
+                                input.focus();
                             }
                         }
                     }
                 }
             } catch (err) {
                 console.error(err);
-                contentDiv.innerText = 'Lỗi: ' + err.message;
+                contentEl.innerHTML = `<span class="text-red-500"><i class="fa-solid fa-triangle-exclamation"></i> Lỗi kết nối: ${err.message}</span>`;
+                contentEl.classList.remove('typing-indicator');
+                isGenerating = false;
+                sendBtn.disabled = false;
             }
         }
 
-        function addMessage(text, role) {
-            const div = document.createElement('div');
-            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
-            div.innerHTML = `
-                <div class="max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200'}">
-                    <div class="content whitespace-pre-wrap text-sm">${text}</div>
-                    <div class="sources mt-3 pt-3 border-t border-slate-100 hidden">
-                        <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Nguồn trích dẫn</p>
-                        <div class="flex flex-wrap gap-2 chips"></div>
+        // --- File Upload ---
+        fileUpload.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            uploadStatus.textContent = "Đang xử lý tài liệu...";
+            uploadStatus.className = "text-xs mt-2 text-center text-amber-400 block animate-pulse";
+            
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    uploadStatus.textContent = `Tải lên thành công! (${data.chunks} chunks)`;
+                    uploadStatus.className = "text-xs mt-2 text-center text-emerald-500 block";
+                    loadStats(); // Reload doc list
+                } else {
+                    throw new Error(data.detail || "Upload failed");
+                }
+            } catch (err) {
+                uploadStatus.textContent = err.message;
+                uploadStatus.className = "text-xs mt-2 text-center text-red-500 block";
+            }
+            
+            setTimeout(() => { uploadStatus.classList.add('hidden'); }, 5000);
+            e.target.value = ''; // Reset input
+        });
+
+        // --- Data Fetching ---
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/sessions');
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                if (data.sessions.length === 0) {
+                    sessionsListEl.innerHTML = '<div class="text-[10px] text-slate-500 text-center py-2">Chưa có hội thoại nào</div>';
+                    return;
+                }
+
+                sessionsListEl.innerHTML = data.sessions.map(s => `
+                    <div class="group flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 cursor-pointer transition-colors ${s.session_id === currentSessionId ? 'bg-slate-800' : ''}" onclick="switchSession('${s.session_id}')">
+                        <div class="flex items-center gap-2 overflow-hidden">
+                            <i class="fa-regular fa-message text-[10px] ${s.session_id === currentSessionId ? 'text-indigo-400' : 'text-slate-500'}"></i>
+                            <span class="text-xs text-slate-300 truncate">${s.last_query || s.session_id.substring(0,8)}</span>
+                        </div>
+                        <button onclick="deleteSession(event, '${s.session_id}')" class="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <i class="fa-solid fa-trash text-[10px]"></i>
+                        </button>
                     </div>
-                </div>
-            `;
-            chatContainer.appendChild(div);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-            return div;
+                `).join('');
+            } catch (e) {
+                console.error(e);
+            }
         }
 
-        function renderSources(msgDiv, sources) {
-            if (!sources || sources.length === 0) return;
-            const sourcesDiv = msgDiv.querySelector('.sources');
-            const chipsDiv = msgDiv.querySelector('.chips');
-            sourcesDiv.classList.remove('hidden');
-            chipsDiv.innerHTML = sources.map(s => `
-                <span class="px-2 py-0.5 bg-slate-100 rounded text-[10px] font-medium text-slate-600 border border-slate-200">
-                    ${s.file} ${s.page ? '(Trang ' + s.page + ')' : ''}
-                </span>
-            `).join('');
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/stats');
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                document.getElementById('doc-count').textContent = data.total_documents;
+                
+                if (data.documents.length === 0) {
+                    docsListEl.innerHTML = '<div class="text-[10px] text-slate-500 text-center py-2">Chưa có tài liệu</div>';
+                    return;
+                }
+
+                docsListEl.innerHTML = data.documents.map(d => `
+                    <div class="group flex items-center justify-between px-2 py-1.5 rounded-md bg-slate-800/30 border border-slate-700/50 hover:border-slate-600 transition-colors">
+                        <div class="flex items-center gap-2 overflow-hidden" title="${d.source}">
+                            <i class="fa-solid fa-file-pdf text-[10px] text-rose-400"></i>
+                            <span class="text-xs text-slate-300 truncate">${d.source}</span>
+                            <span class="text-[9px] text-slate-500 bg-slate-800 px-1 rounded">${d.chunk_count}c</span>
+                        </div>
+                        <button onclick="deleteDoc(event, '${d.doc_id}')" class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1">
+                            <i class="fa-solid fa-xmark text-[10px]"></i>
+                        </button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error(e);
+            }
         }
 
-        sendBtn.addEventListener('click', handleSearch);
+        // --- Actions ---
+        function createNewSession() {
+            currentSessionId = generateUUID();
+            sessionIdBadge.textContent = "New";
+            messagesList.innerHTML = '';
+            welcomeMsg.style.display = 'flex';
+            messagesList.appendChild(welcomeMsg);
+            loadSessions();
+        }
+
+        window.switchSession = async function(id) {
+            currentSessionId = id;
+            sessionIdBadge.textContent = id.substring(0,8);
+            messagesList.innerHTML = '<div class="text-center py-10"><span class="loader"></span></div>';
+            loadSessions();
+            
+            try {
+                const res = await fetch(`/api/sessions/${id}/history`);
+                const data = await res.json();
+                messagesList.innerHTML = '';
+                welcomeMsg.style.display = 'none';
+                
+                if (data.history && data.history.length > 0) {
+                    data.history.forEach(turn => {
+                        if (turn.user) addMessageUser(turn.user);
+                        if (turn.assistant) {
+                            const msgEl = createAssistantMessagePlaceholder();
+                            const contentEl = msgEl.querySelector('.markdown-content');
+                            contentEl.classList.remove('typing-indicator');
+                            contentEl.innerHTML = marked.parse(turn.assistant);
+                        }
+                    });
+                }
+            } catch (e) {
+                messagesList.innerHTML = '<div class="text-center text-red-500 text-sm">Lỗi tải lịch sử</div>';
+            }
+        }
+
+        window.deleteSession = async function(e, id) {
+            e.stopPropagation();
+            if (!confirm('Xóa phiên chat này?')) return;
+            try {
+                await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+                if (currentSessionId === id) createNewSession();
+                else loadSessions();
+            } catch (err) { alert('Lỗi xóa session'); }
+        }
+
+        window.deleteDoc = async function(e, id) {
+            e.stopPropagation();
+            if (!confirm('Xóa tài liệu này khỏi Database?')) return;
+            try {
+                await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+                loadStats();
+            } catch (err) { alert('Lỗi xóa tài liệu'); }
+        }
+
+        // --- Event Listeners ---
+        sendBtn.addEventListener('click', sendMessage);
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSearch();
+                sendMessage();
             }
         });
+
+        // Init
+        marked.setOptions({ breaks: true, gfm: true });
+        loadSessions();
+        loadStats();
     </script>
 </body>
 </html>

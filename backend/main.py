@@ -376,29 +376,157 @@ async def search_documents(request: SearchRequest):
 
 @app.post("/api/search/stream", dependencies=[Depends(verify_api_key)])
 async def search_documents_stream(request: SearchRequest):
-    """Search and stream AI answer tokens."""
+    """Search and stream AI answer tokens, fully equipped with Agentic features."""
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    # 1. Rewrite
-    rewritten_query = request.query.strip()
-    if ENABLE_QUERY_REWRITE:
-        try:
-            rewritten_query = await run_in_threadpool(rewrite_query, request.query)
-        except Exception as e:
-            logger.error("Query rewrite error: {}", e)
+    total_start = time.perf_counter()
+    timings_ms = {}
 
-    # 2. Retrieve & Rerank
-    results = await run_in_threadpool(search, rewritten_query, request.top_k * 2)
-    results = await run_in_threadpool(rerank_results, rewritten_query, results, request.top_k)
+    # 1. Intent Classification
+    has_history = bool((ENABLE_PERSISTENT_MEMORY and request.session_id) or request.history)
+    intent_result = classify_intent(request.query, has_history=has_history)
+    intent = intent_result["intent"]
+    timings_ms["intent"] = round((time.perf_counter() - total_start) * 1000, 1)
 
-    # 3. History
-    effective_history = select_relevant_history(request.query, request.history)
+    # Helper stream generator
+    async def stream_generator():
+        # --- Chitchat ---
+        if intent == "chitchat":
+            chitchat_answer = get_chitchat_response(request.query)
+            if ENABLE_PERSISTENT_MEMORY and request.session_id:
+                await run_in_threadpool(save_turn, request.session_id, request.query, chitchat_answer)
+            # Fake stream for chitchat
+            for char in chitchat_answer:
+                yield f"data: {json.dumps({'type': 'token', 'token': char}, ensure_ascii=False)}\n\n"
+            
+            meta = {
+                "type": "metadata",
+                "intent": "chitchat",
+                "needs_clarification": False,
+                "sources": [],
+                "quality_score": 10.0,
+                "timings_ms": {"total": round((time.perf_counter() - total_start) * 1000, 1)}
+            }
+            yield f"data: {json.dumps(meta, ensure_ascii=False)}\n\n"
+            yield "data: {\"type\": \"done\"}\n\n"
+            
+            # Ghi Trace
+            run_in_threadpool(log_trace, {"query": request.query, "intent": "chitchat", "ai_answer": chitchat_answer})
+            return
 
-    # 4. Stream Response
-    def stream_generator():
+        is_followup = (intent == "followup")
+        rewritten_query = request.query.strip()
+
+        # --- Rewrite ---
+        rewrite_start = time.perf_counter()
+        if ENABLE_QUERY_REWRITE:
+            try:
+                rewritten_query = await run_in_threadpool(rewrite_query, request.query)
+            except Exception:
+                rewritten_query = request.query.strip()
+        timings_ms["rewrite"] = round((time.perf_counter() - rewrite_start) * 1000, 1)
+
+        # --- HyDE ---
+        hyde_start = time.perf_counter()
+        retrieval_query = rewritten_query
+        if ENABLE_HYDE:
+            try:
+                retrieval_query = await run_in_threadpool(hyde_expand_query, rewritten_query)
+            except Exception:
+                pass
+        timings_ms["hyde"] = round((time.perf_counter() - hyde_start) * 1000, 1)
+
+        # --- Search & Rerank ---
+        retrieve_start = time.perf_counter()
+        results = await run_in_threadpool(search, retrieval_query, request.top_k * 2)
+        timings_ms["retrieve"] = round((time.perf_counter() - retrieve_start) * 1000, 1)
+
+        rerank_start = time.perf_counter()
+        results = await run_in_threadpool(rerank_results, rewritten_query, results, request.top_k)
+        timings_ms["rerank"] = round((time.perf_counter() - rerank_start) * 1000, 1)
+
+        # --- Clarification Gate ---
+        if ENABLE_CLARIFICATION_GATE and not is_followup:
+            top_sim = results[0]["similarity"] if results else 0
+            second_sim = results[1]["similarity"] if len(results) > 1 else 0
+            margin = top_sim - second_sim
+            low_conf = top_sim < CLARIFICATION_MIN_TOP_SIMILARITY
+            ambiguous = (len(results) > 1 and margin < CLARIFICATION_MARGIN_MIN and top_sim < CLARIFICATION_HIGH_CONFIDENCE)
+
+            if not results or low_conf or ambiguous:
+                clarification_question = build_clarification_question(request.query, results)
+                for char in clarification_question:
+                    yield f"data: {json.dumps({'type': 'token', 'token': char}, ensure_ascii=False)}\n\n"
+                
+                meta = {
+                    "type": "metadata",
+                    "intent": intent,
+                    "needs_clarification": True,
+                    "sources": [],
+                    "timings_ms": {**timings_ms, "total": round((time.perf_counter() - total_start) * 1000, 1)}
+                }
+                yield f"data: {json.dumps(meta, ensure_ascii=False)}\n\n"
+                yield "data: {\"type\": \"done\"}\n\n"
+                run_in_threadpool(log_trace, {"query": request.query, "intent": intent, "needs_clarification": True, "ai_answer": clarification_question})
+                return
+
+        # --- CRAG ---
+        crag_start = time.perf_counter()
+        crag_result = await run_in_threadpool(crag_check_relevance, request.query, results)
+        timings_ms["crag"] = round((time.perf_counter() - crag_start) * 1000, 1)
+        
+        if crag_result["verdict"] == "irrelevant":
+            ans = "Không tìm thấy thông tin liên quan trong tài liệu. " + crag_result["reason"]
+            for char in ans:
+                yield f"data: {json.dumps({'type': 'token', 'token': char}, ensure_ascii=False)}\n\n"
+            meta = {
+                "type": "metadata",
+                "intent": intent,
+                "needs_clarification": False,
+                "sources": [],
+                "timings_ms": {**timings_ms, "total": round((time.perf_counter() - total_start) * 1000, 1)}
+            }
+            yield f"data: {json.dumps(meta, ensure_ascii=False)}\n\n"
+            yield "data: {\"type\": \"done\"}\n\n"
+            run_in_threadpool(log_trace, {"query": request.query, "crag_verdict": "irrelevant", "ai_answer": ans})
+            return
+
+        results = crag_result["filtered_results"]
+
+        # --- History ---
+        effective_history = []
+        if ENABLE_PERSISTENT_MEMORY and request.session_id:
+            db_history = await run_in_threadpool(get_history, request.session_id)
+            effective_history = db_history if is_followup else select_relevant_history(request.query, db_history)
+        elif request.history:
+            effective_history = request.history if is_followup else select_relevant_history(request.query, request.history)
+
+        # --- Generation Stream ---
+        full_answer = ""
+        sources = []
         for chunk in generate_answer_stream(request.query, results, False, effective_history):
-            yield f"data: {chunk}\n\n"
+            try:
+                data = json.loads(chunk)
+                if data["type"] == "token":
+                    full_answer += data["token"]
+                    yield f"data: {chunk}\n\n"
+                elif data["type"] == "metadata":
+                    sources = data.get("sources", [])
+                    # augment metadata
+                    data["intent"] = intent
+                    data["needs_clarification"] = False
+                    data["timings_ms"] = {**timings_ms, "total": round((time.perf_counter() - total_start) * 1000, 1)}
+                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                elif data["type"] == "done":
+                    yield f"data: {chunk}\n\n"
+            except:
+                yield f"data: {chunk}\n\n"
+
+        if ENABLE_PERSISTENT_MEMORY and request.session_id:
+            await run_in_threadpool(save_turn, request.session_id, request.query, full_answer)
+            
+        run_in_threadpool(log_trace, {"query": request.query, "intent": intent, "ai_answer": full_answer, "sources": sources})
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 

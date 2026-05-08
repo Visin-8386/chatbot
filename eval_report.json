@@ -1,0 +1,20 @@
+[
+    {
+        "query": "Quy trình xin nghỉ phép hàng năm như thế nào?",
+        "answer": "Nhân viên được nghỉ 12 ngày/năm.",
+        "faithfulness": 8,
+        "relevance": 4
+    },
+    {
+        "query": "Mã thiết bị MAINT-2024-SERVER được đặt ở đâu?",
+        "answer": "Mã thiết bị MAINT-2024-SERVER được đặt tại DC-01.",
+        "faithfulness": 4,
+        "relevance": 8
+    },
+    {
+        "query": "Công ty có hỗ trợ ăn trưa không?",
+        "answer": "Không tìm thấy thông tin trong tài liệu được cung cấp.",
+        "faithfulness": 0,
+        "relevance": 10
+    }
+]
