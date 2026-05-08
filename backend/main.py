@@ -34,6 +34,8 @@ from backend.config import (
     CLARIFICATION_HIGH_CONFIDENCE,
     SELF_CHECK_MIN_GROUNDEDNESS,
     FASTEST_RESPONSE_MODE,
+    ENABLE_HYDE,
+    ENABLE_PERSISTENT_MEMORY,
 )
 from backend.document_processor import process_document
 from backend.vector_store import add_documents, search, delete_document, get_all_documents, get_stats
@@ -48,17 +50,22 @@ from backend.generator import (
     generate_extractive_answer,
     select_relevant_history,
     preload_models,
+    hyde_expand_query,
+    crag_check_relevance,
 )
+from backend.chat_memory import init_db, save_turn, get_history, delete_session, get_all_sessions
 
 app = FastAPI(title="Company Document Chatbot", version="1.0.0")
 
 
 @app.on_event("startup")
 async def startup_preload():
-    """Preload models at server start."""
+    """Preload models and initialize DB at server start."""
+    logger.info("[STARTUP] Initializing chat memory DB...")
+    init_db()
     logger.info("[STARTUP] Preloading models (LLM, Reranker, Embedding)...")
     await run_in_threadpool(preload_models)
-    logger.info("[STARTUP] All models ready.")
+    logger.info("[STARTUP] All systems ready.")
 
 
 # CORS
@@ -158,20 +165,32 @@ async def search_documents(request: SearchRequest):
     timings_ms = {}
 
     rewritten_query = request.query.strip()
+
+    # 1. Query Rewrite
     rewrite_start = time.perf_counter()
     if ENABLE_QUERY_REWRITE:
         try:
             rewritten_query = await run_in_threadpool(rewrite_query, request.query)
         except Exception as e:
-            print(f"Query rewrite error: {e}")
+            logger.error("Query rewrite error: {}", e)
             rewritten_query = request.query.strip()
     timings_ms["rewrite"] = round((time.perf_counter() - rewrite_start) * 1000, 1)
 
+    # 1b. HyDE — expand query with hypothetical answer (2.1)
+    hyde_start = time.perf_counter()
+    retrieval_query = rewritten_query
+    if ENABLE_HYDE:
+        try:
+            retrieval_query = await run_in_threadpool(hyde_expand_query, rewritten_query)
+        except Exception as e:
+            logger.warning("[HyDE] error: {}", e)
+    timings_ms["hyde"] = round((time.perf_counter() - hyde_start) * 1000, 1)
+
+    # 2. Retrieve & Rerank
     retrieve_start = time.perf_counter()
-    results = await run_in_threadpool(search, rewritten_query, request.top_k * 2) # Get more for reranking
+    results = await run_in_threadpool(search, retrieval_query, request.top_k * 2)
     timings_ms["retrieve"] = round((time.perf_counter() - retrieve_start) * 1000, 1)
 
-    # Reranking
     rerank_start = time.perf_counter()
     results = await run_in_threadpool(rerank_results, rewritten_query, results, request.top_k)
     timings_ms["rerank"] = round((time.perf_counter() - rerank_start) * 1000, 1)
@@ -212,8 +231,34 @@ async def search_documents(request: SearchRequest):
                 }
             }
 
-    # Reduce context drift: drop old history when query shifts topic.
-    effective_history = select_relevant_history(request.query, request.history)
+    # CRAG — kiểm tra độ liên quan trc khi generate (2.2)
+    crag_start = time.perf_counter()
+    crag_result = await run_in_threadpool(crag_check_relevance, request.query, results)
+    timings_ms["crag"] = round((time.perf_counter() - crag_start) * 1000, 1)
+    crag_verdict = crag_result["verdict"]
+    results = crag_result["filtered_results"]  # Empty nếu irrelevant
+
+    if crag_verdict == "irrelevant":
+        return {
+            "query": request.query,
+            "rewritten_query": rewritten_query,
+            "needs_clarification": False,
+            "crag_verdict": "irrelevant",
+            "ai_answer": "Không tìm thấy thông tin liên quan trong tài liệu. " + crag_result["reason"],
+            "ai_sources": [],
+            "results": [],
+            "total": 0,
+            "timings_ms": {**timings_ms, "generate": 0.0, "self_check": 0.0,
+                           "total": round((time.perf_counter() - total_start) * 1000, 1)}
+        }
+
+    # Lấy history: ưu tiên từ Persistent Memory (2.3), fallback về request.history
+    effective_history = []
+    if ENABLE_PERSISTENT_MEMORY and request.session_id:
+        db_history = await run_in_threadpool(get_history, request.session_id)
+        effective_history = select_relevant_history(request.query, db_history)
+    elif request.history:
+        effective_history = select_relevant_history(request.query, request.history)
 
     # Generate answer using fastest mode or LLM mode
     generate_start = time.perf_counter()
@@ -259,12 +304,18 @@ async def search_documents(request: SearchRequest):
     timings_ms["self_check"] = round((time.perf_counter() - self_check_start) * 1000, 1)
     timings_ms["total"] = round((time.perf_counter() - total_start) * 1000, 1)
 
+    # Lưu lượt hội thoại vào Persistent Memory (2.3)
+    if ENABLE_PERSISTENT_MEMORY and request.session_id:
+        plain_answer = ai_result["answer"].split("\n\n\U0001f4cc", 1)[0].strip()
+        await run_in_threadpool(save_turn, request.session_id, request.query, plain_answer)
+
     return {
         "query": request.query,
         "session_id": request.session_id,
         "rewritten_query": rewritten_query,
         "needs_clarification": needs_clarification,
         "clarification_question": clarification_question,
+        "crag_verdict": crag_verdict if 'crag_verdict' in dir() else "skipped",
         "generation_mode": generation_mode,
         "self_check_status": self_check_status,
         "quality_score": round(quality_score, 3) if quality_score is not None else None,
@@ -340,6 +391,29 @@ async def remove_document(doc_id: str):
 async def system_stats():
     """Get system statistics."""
     return get_stats()
+
+
+# --- Session / Memory Endpoints (2.3) ---
+
+@app.get("/api/sessions", dependencies=[Depends(verify_api_key)])
+async def list_sessions():
+    """Liệt kê tất cả session đã có trong bộ nhớ."""
+    sessions = await run_in_threadpool(get_all_sessions)
+    return {"sessions": sessions, "total": len(sessions)}
+
+
+@app.get("/api/sessions/{session_id}/history", dependencies=[Depends(verify_api_key)])
+async def get_session_history(session_id: str, max_turns: Optional[int] = None):
+    """Lấy lịch sử hội thoại của một session."""
+    history = await run_in_threadpool(get_history, session_id, max_turns)
+    return {"session_id": session_id, "history": history, "turns": len(history)}
+
+
+@app.delete("/api/sessions/{session_id}", dependencies=[Depends(verify_api_key)])
+async def clear_session(session_id: str):
+    """Xóa toàn bộ lịch sử của một session."""
+    deleted = await run_in_threadpool(delete_session, session_id)
+    return {"success": True, "deleted_rows": deleted, "session_id": session_id}
 
 
 @app.get("/api/health")

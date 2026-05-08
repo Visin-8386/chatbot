@@ -9,9 +9,16 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 CHROMA_DIR = os.path.join(BASE_DIR, "data", "chroma_db")
 
-# Create directories if they don't exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
+
+# Model Storage (Keep everything in the project directory)
+MODELS_DIR = os.path.join(BASE_DIR, "data", "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
+
+# Set HuggingFace Cache Directory
+os.environ["HF_HOME"] = MODELS_DIR
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = MODELS_DIR
 
 
 def _parse_csv_env(name: str, default: List[str]) -> List[str]:
@@ -25,9 +32,10 @@ def _parse_csv_env(name: str, default: List[str]) -> List[str]:
 # Embedding Model
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
-# LLM Model
-LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-LLM_LOAD_IN_4BIT = os.getenv("LLM_LOAD_IN_4BIT", "1") == "1"
+# LLM Model (GGUF Version for Speed & Efficiency)
+LLM_MODEL = os.getenv("LLM_MODEL", "bartowski/Qwen2.5-7B-Instruct-GGUF")
+LLM_GGUF_FILENAME = os.getenv("LLM_GGUF_FILENAME", "Qwen2.5-7B-Instruct-Q4_K_M.gguf")
+LLM_LOAD_IN_4BIT = True # GGUF is already quantized
 
 # Chunking
 CHUNK_SIZE = 800          # characters per chunk (optimized for Vietnamese)
@@ -45,6 +53,11 @@ MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "6"))
 ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "0") == "1"
 ENABLE_CLARIFICATION_GATE = os.getenv("ENABLE_CLARIFICATION_GATE", "1") == "1"
 ENABLE_SELF_CHECK = os.getenv("ENABLE_SELF_CHECK", "0") == "1"
+
+# Giai đoạn 2: Agentic RAG
+ENABLE_HYDE = os.getenv("ENABLE_HYDE", "0") == "1"                       # 2.1 Query Expansion
+CRAG_RELEVANCE_THRESHOLD = float(os.getenv("CRAG_RELEVANCE_THRESHOLD", "55"))  # 2.2 CRAG gate (%)
+ENABLE_PERSISTENT_MEMORY = os.getenv("ENABLE_PERSISTENT_MEMORY", "1") == "1"   # 2.3 SQLite memory
 
 # Search
 TOP_K = 3                 # number of results to return

@@ -2,6 +2,7 @@
 Generator Service - Local LLM (Qwen2.5-1.5B-Instruct) with float16 on GPU.
 No external API needed. Runs entirely on your RTX 3060.
 """
+import os
 import torch
 import threading
 import re
@@ -20,9 +21,13 @@ from backend.config import (
     REWRITE_MAX_NEW_TOKENS,
     GENERATION_MAX_TIME_SEC,
     LLM_MODEL,
-    LLM_LOAD_IN_4BIT,
+    LLM_GGUF_FILENAME,
+    MODELS_DIR,
+    ENABLE_HYDE,
+    CRAG_RELEVANCE_THRESHOLD,
 )
-from transformers import BitsAndBytesConfig
+from llama_cpp import Llama
+from huggingface_hub import hf_hub_download
 
 # Use model from config
 MODEL_NAME = LLM_MODEL
@@ -42,56 +47,36 @@ warnings.filterwarnings(
 logger.add("logs/backend.log", rotation="10 MB", format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
 
-def get_tokenizer() -> AutoTokenizer:
-    """Load and cache the tokenizer on first use."""
-    global _tokenizer
-    if _tokenizer is None:
-        with _tokenizer_lock:
-            if _tokenizer is None:
-                logger.info("Loading tokenizer for local LLM: {}", MODEL_NAME)
-                _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    return _tokenizer
+def get_tokenizer():
+    """Llama-cpp handles tokenization internally."""
+    return None
 
 
-def get_model() -> AutoModelForCausalLM:
-    """Load and cache the model on first use."""
+def get_model() -> Llama:
+    """Load and cache the GGUF model on first use."""
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                logger.info("Downloading/Loading GGUF Model: {} ({})", LLM_MODEL, LLM_GGUF_FILENAME)
                 
-                # Setup quantization config if requested
-                quant_config = None
-                load_dtype = torch.float16
-                
-                if LLM_LOAD_IN_4BIT and device == "cuda":
-                    logger.info("Initializing Local LLM ({}) in 4-bit (NF4) mode...", MODEL_NAME)
-                    quant_config = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.float16,
-                        bnb_4bit_quant_type="nf4",
-                        bnb_4bit_use_double_quant=True,
-                    )
-                else:
-                    logger.info("Initializing Local LLM ({}) in float16 mode...", MODEL_NAME)
-
-                _model = AutoModelForCausalLM.from_pretrained(
-                    MODEL_NAME,
-                    quantization_config=quant_config,
-                    torch_dtype=load_dtype,
-                    device_map="auto" if device == "cuda" else "cpu"
+                # Download model file if not exists
+                model_path = hf_hub_download(
+                    repo_id=LLM_MODEL,
+                    filename=LLM_GGUF_FILENAME,
+                    cache_dir=MODELS_DIR
                 )
                 
-                if hasattr(_model, "generation_config"):
-                    _model.generation_config.temperature = None
-                    _model.generation_config.top_p = None
-                    _model.generation_config.top_k = None
+                logger.info("Initializing Llama-cpp (GGUF) on GPU...")
+                _model = Llama(
+                    model_path=model_path,
+                    n_ctx=4096,           # Context window
+                    n_gpu_layers=-1,      # -1 means all layers to GPU
+                    n_threads=os.cpu_count() or 4,
+                    verbose=False
+                )
                 
-                if torch.cuda.is_available():
-                    vram_mb = torch.cuda.memory_allocated() / 1024 / 1024
-                    logger.info("[GPU] VRAM used: {:.0f} MB", vram_mb)
-                logger.info("Local LLM ready on {}.", device.upper())
+                logger.info("Llama-cpp (GGUF) ready with GPU acceleration.")
     return _model
 
 
@@ -107,7 +92,7 @@ def get_reranker() -> CrossEncoder:
                 model_name = "BAAI/bge-reranker-base"
                 logger.info("Loading Reranker: {}", model_name)
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-                _reranker = CrossEncoder(model_name, device=device)
+                _reranker = CrossEncoder(model_name, device=device)  # Cache dir controlled via HF_HOME env var
                 logger.info("Reranker ready on {}.", device.upper())
     return _reranker
 
@@ -118,8 +103,7 @@ def is_model_loaded() -> bool:
 
 
 def preload_models():
-    """Preload tokenizer, LLM, and Reranker at startup."""
-    get_tokenizer()
+    """Preload LLM and Reranker at startup."""
     get_model()
     get_reranker()
 
@@ -151,50 +135,35 @@ def _build_source_citation_text(sources_info: List[Dict]) -> str:
 
 
 def _run_chat(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS, strict: bool = False) -> str:
-    """Run local chat generation (synchronous)."""
-    tokenizer = get_tokenizer()
+    """Run GGUF chat generation (synchronous)."""
     model = get_model()
-
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-    with torch.no_grad():
-        generated_ids = model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            max_time=GENERATION_MAX_TIME_SEC,
-            do_sample=False,
-            repetition_penalty=1.1
-        )
-
-    output_ids = generated_ids[0][model_inputs.input_ids.shape[1]:]
-    return tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+    
+    # Llama-cpp handles chat templates internally if specified, 
+    # but Qwen 2.5 works well with its standard format.
+    response = model.create_chat_completion(
+        messages=messages,
+        max_tokens=max_new_tokens,
+        temperature=0.1,
+        repeat_penalty=1.1,
+    )
+    return response["choices"][0]["message"]["content"].strip()
 
 
 def _run_chat_stream(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS) -> Generator[str, None, None]:
-    """Run local chat generation with streaming tokens."""
-    tokenizer = get_tokenizer()
+    """Run GGUF chat generation with streaming tokens."""
     model = get_model()
-
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
-    generation_kwargs = dict(
-        **model_inputs,
-        streamer=streamer,
-        max_new_tokens=max_new_tokens,
-        max_time=GENERATION_MAX_TIME_SEC,
-        do_sample=False,
-        repetition_penalty=1.1
+    stream = model.create_chat_completion(
+        messages=messages,
+        max_tokens=max_new_tokens,
+        temperature=0.1,
+        repeat_penalty=1.1,
+        stream=True
     )
 
-    thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
-    thread.start()
-
-    for new_text in streamer:
-        yield new_text
+    for chunk in stream:
+        if "content" in chunk["choices"][0]["delta"]:
+            yield chunk["choices"][0]["delta"]["content"]
 
 
 def rewrite_query(query: str) -> str:
@@ -550,4 +519,125 @@ def generate_extractive_answer(search_results: List[Dict]) -> Dict:
     return {
         "answer": answer,
         "sources": sources_info
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Giai đoạn 2.1 — HyDE (Hypothetical Document Embeddings)
+# ─────────────────────────────────────────────────────────────
+
+def hyde_expand_query(query: str) -> str:
+    """
+    Sinh ra một câu trả lời giả lập (hypothetical answer) để dùng làm
+    query vector thay vì câu hỏi gốc.
+
+    Lợi ích: Bridging the gap giữa văn phong câu hỏi và văn phong tài liệu,
+    giúp vector search tìm được chunk liên quan chính xác hơn.
+
+    Returns:
+        Chuỗi: câu trả lời giả lập nếu thành công, ngược lại trả về query gốc.
+    """
+    if not ENABLE_HYDE:
+        return query
+
+    system_msg = (
+        "Bạn là chuyên gia tra cứu tài liệu nội bộ công ty. "
+        "Hãy viết MỘT đoạn văn ngắn (2-4 câu) mô tả nội dung của tài liệu "
+        "mà bạn dự đoán sẽ trả lời được câu hỏi dưới đây. "
+        "Chỉ viết đoạn văn mô tả, không giải thích, không thêm tiêu đề."
+    )
+    user_msg = f"Câu hỏi: {query}"
+    try:
+        hypothetical = _run_chat(
+            [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg}
+            ],
+            max_new_tokens=120,
+        )
+        expanded = hypothetical.strip()
+        if expanded:
+            logger.debug("[HyDE] Expanded query: {}", expanded[:120])
+            # Nối câu hỏi gốc + câu trả lời giả lập để giữ cả hai tín hiệu
+            return f"{query}\n{expanded}"
+    except Exception as e:
+        logger.warning("[HyDE] Failed, falling back to original query: {}", e)
+    return query
+
+
+# ─────────────────────────────────────────────────────────────
+# Giai đoạn 2.2 — CRAG (Corrective RAG Relevance Gate)
+# ─────────────────────────────────────────────────────────────
+
+def crag_check_relevance(query: str, search_results: List[Dict]) -> Dict:
+    """
+    Kiểm tra mức độ liên quan của các chunk đã lấy về so với câu hỏi.
+
+    Ba kết quả có thể xảy ra:
+      - "relevant":   Tài liệu đủ tốt → tiếp tục generate.
+      - "ambiguous":  Tài liệu khớp một phần → generate nhưng thêm disclaimer.
+      - "irrelevant": Tài liệu không liên quan → từ chối generate, báo người dùng.
+
+    Returns:
+        {"verdict": str, "reason": str, "filtered_results": List[Dict]}
+    """
+    if not search_results:
+        return {
+            "verdict": "irrelevant",
+            "reason": "Không tìm thấy tài liệu nào liên quan.",
+            "filtered_results": []
+        }
+
+    top_similarity = search_results[0].get("similarity", 0)
+
+    # Fast-path: dựa vào similarity score để tránh tốn token LLM
+    if top_similarity >= CRAG_RELEVANCE_THRESHOLD:
+        return {
+            "verdict": "relevant",
+            "reason": f"Top similarity {top_similarity:.1f}% vượt ngưỡng.",
+            "filtered_results": search_results
+        }
+
+    if top_similarity < CRAG_RELEVANCE_THRESHOLD * 0.5:
+        return {
+            "verdict": "irrelevant",
+            "reason": f"Top similarity {top_similarity:.1f}% quá thấp. Không đủ dữ liệu để trả lời.",
+            "filtered_results": []
+        }
+
+    # Vùng mờ: nhờ LLM phán xét nhanh
+    context_preview = search_results[0]["text"][:400]
+    system_msg = (
+        "Trả lời đúng MỘT từ: RELEVANT, AMBIGUOUS, hoặc IRRELEVANT.\n"
+        "RELEVANT    = tài liệu có thể trả lời trực tiếp câu hỏi.\n"
+        "AMBIGUOUS   = tài liệu liên quan một phần nhưng không đủ.\n"
+        "IRRELEVANT  = tài liệu hoàn toàn không liên quan."
+    )
+    user_msg = (
+        f"Câu hỏi: {query}\n\n"
+        f"Đoạn tài liệu:\n{context_preview}"
+    )
+    verdict = "ambiguous"  # default
+    try:
+        raw = _run_chat(
+            [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg}
+            ],
+            max_new_tokens=8,
+        ).strip().upper()
+        if "RELEVANT" in raw and "IRRELEVANT" not in raw:
+            verdict = "relevant"
+        elif "IRRELEVANT" in raw:
+            verdict = "irrelevant"
+        else:
+            verdict = "ambiguous"
+    except Exception as e:
+        logger.warning("[CRAG] LLM check failed: {}", e)
+
+    logger.info("[CRAG] verdict={} sim={:.1f}%", verdict, top_similarity)
+    return {
+        "verdict": verdict,
+        "reason": f"LLM verdict: {verdict} (similarity {top_similarity:.1f}%).",
+        "filtered_results": search_results if verdict != "irrelevant" else []
     }

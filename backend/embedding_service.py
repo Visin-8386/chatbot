@@ -3,7 +3,7 @@ Embedding Service - Handles text embedding using intfloat/multilingual-e5-small.
 """
 from typing import List
 from sentence_transformers import SentenceTransformer
-from backend.config import EMBEDDING_MODEL
+from backend.config import EMBEDDING_MODEL, MODELS_DIR
 
 # Global model instance (loaded once)
 _model = None
@@ -14,7 +14,7 @@ def get_model() -> SentenceTransformer:
     global _model
     if _model is None:
         print(f"Loading embedding model: {EMBEDDING_MODEL}...")
-        _model = SentenceTransformer(EMBEDDING_MODEL)
+        _model = SentenceTransformer(EMBEDDING_MODEL, cache_folder=MODELS_DIR)
         print("Model loaded successfully!")
     return _model
 
