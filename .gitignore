@@ -35,3 +35,6 @@ logs/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Model weights
+data/models/
