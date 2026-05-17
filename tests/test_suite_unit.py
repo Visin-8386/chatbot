@@ -10,6 +10,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ── Patch DB path trước khi import ─────────────────────────────────────────
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
+
+# Mock llama_cpp trước khi bất kỳ module nào của backend được import
+from unittest.mock import MagicMock
+import sys
+sys.modules["llama_cpp"] = MagicMock()
+
 import backend.chat_memory as _cm
 _cm.DB_PATH = _tmp_db.name
 

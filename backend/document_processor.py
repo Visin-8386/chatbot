@@ -131,7 +131,7 @@ def _remove_repeated_margin_lines(lines: List[str], repeated_signatures: set) ->
         signature = _line_signature(line)
         near_top = index < 2
         near_bottom = index >= max(0, last_index - 1)
-        if signature in repeated_signatures and (near_top or near_bottom or _is_page_number_line(line)):
+        if (signature in repeated_signatures and (near_top or near_bottom)) or _is_page_number_line(line):
             continue
         cleaned.append(line)
 

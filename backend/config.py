@@ -46,7 +46,7 @@ MAX_CHUNKS_PER_SECTION = int(os.getenv("MAX_CHUNKS_PER_SECTION", "250"))
 PDF_MARGIN_REPEAT_RATIO = float(os.getenv("PDF_MARGIN_REPEAT_RATIO", "0.8"))
 
 # Generation context budget
-MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "4000"))
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "8000"))  # Tăng để lấy nhiều nội dung hơn từ tài liệu
 MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "6"))
 
 # Agentic-lite controls
@@ -56,7 +56,7 @@ ENABLE_SELF_CHECK = os.getenv("ENABLE_SELF_CHECK", "0") == "1"
 
 # Giai đoạn 2: Agentic RAG
 ENABLE_HYDE = os.getenv("ENABLE_HYDE", "0") == "1"                       # 2.1 Query Expansion
-CRAG_RELEVANCE_THRESHOLD = float(os.getenv("CRAG_RELEVANCE_THRESHOLD", "55"))  # 2.2 CRAG gate (%)
+CRAG_RELEVANCE_THRESHOLD = float(os.getenv("CRAG_RELEVANCE_THRESHOLD", "40"))  # 2.2 CRAG gate (%) - giảm để ít reject hơn
 ENABLE_PERSISTENT_MEMORY = os.getenv("ENABLE_PERSISTENT_MEMORY", "1") == "1"   # 2.3 SQLite memory
 
 # Search
@@ -69,14 +69,14 @@ RERANK_KEYWORD_WEIGHT = float(os.getenv("RERANK_KEYWORD_WEIGHT", "0.25"))
 # Truncate chunk text khi rerank: 300 chars (~60-80 tokens) đủ để judge relevance
 RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "300"))
 
-# Giảm từ 56->45: tài liệu kỹ thuật thường similarity thấp hơn tài liệu hành chính
-CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "45"))
-CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "4"))
-CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "75"))
+# Nới lỏng Clarification Gate: tài liệu kỹ thuật thường có nhiều kết quả gần nhau là bình thường
+CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "35"))  # Giảm từ 45 -> 35
+CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "2"))               # Giảm từ 4 -> 2
+CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "60"))   # Giảm từ 75 -> 60
 SELF_CHECK_MIN_GROUNDEDNESS = float(os.getenv("SELF_CHECK_MIN_GROUNDEDNESS", "0.35"))
 
 # Generation speed controls
-GENERATION_MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "256"))
+GENERATION_MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "512"))  # Tăng để trả lời đầy đủ hơn
 REWRITE_MAX_NEW_TOKENS = int(os.getenv("REWRITE_MAX_NEW_TOKENS", "24"))
 GENERATION_MAX_TIME_SEC = float(os.getenv("GENERATION_MAX_TIME_SEC", "30"))
 FASTEST_RESPONSE_MODE = os.getenv("FASTEST_RESPONSE_MODE", "0") == "1"

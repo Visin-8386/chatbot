@@ -80,6 +80,8 @@ app.add_middleware(
 )
 
 
+
+
 async def verify_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
     """Allow access when API_KEY is unset; otherwise require matching header."""
     if not API_KEY:
@@ -412,7 +414,7 @@ async def search_documents_stream(request: SearchRequest):
             yield "data: {\"type\": \"done\"}\n\n"
             
             # Ghi Trace
-            run_in_threadpool(log_trace, {"query": request.query, "intent": "chitchat", "ai_answer": chitchat_answer})
+            await run_in_threadpool(log_trace, {"query": request.query, "intent": "chitchat", "ai_answer": chitchat_answer})
             return
 
         is_followup = (intent == "followup")
@@ -468,7 +470,7 @@ async def search_documents_stream(request: SearchRequest):
                 }
                 yield f"data: {json.dumps(meta, ensure_ascii=False)}\n\n"
                 yield "data: {\"type\": \"done\"}\n\n"
-                run_in_threadpool(log_trace, {"query": request.query, "intent": intent, "needs_clarification": True, "ai_answer": clarification_question})
+                await run_in_threadpool(log_trace, {"query": request.query, "intent": intent, "needs_clarification": True, "ai_answer": clarification_question})
                 return
 
         # --- CRAG ---
@@ -489,7 +491,7 @@ async def search_documents_stream(request: SearchRequest):
             }
             yield f"data: {json.dumps(meta, ensure_ascii=False)}\n\n"
             yield "data: {\"type\": \"done\"}\n\n"
-            run_in_threadpool(log_trace, {"query": request.query, "crag_verdict": "irrelevant", "ai_answer": ans})
+            await run_in_threadpool(log_trace, {"query": request.query, "crag_verdict": "irrelevant", "ai_answer": ans})
             return
 
         results = crag_result["filtered_results"]
@@ -526,7 +528,7 @@ async def search_documents_stream(request: SearchRequest):
         if ENABLE_PERSISTENT_MEMORY and request.session_id:
             await run_in_threadpool(save_turn, request.session_id, request.query, full_answer)
             
-        run_in_threadpool(log_trace, {"query": request.query, "intent": intent, "ai_answer": full_answer, "sources": sources})
+        await run_in_threadpool(log_trace, {"query": request.query, "intent": intent, "ai_answer": full_answer, "sources": sources})
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
@@ -608,12 +610,13 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 @app.get("/")
 async def serve_index():
+    """Phục vụ file index.html chính."""
     index_path = os.path.join(FRONTEND_DIR, "index.html")
     if not os.path.exists(index_path):
         return HTMLResponse(content="<h1>Frontend index.html not found</h1>", status_code=404)
     with open(index_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
-# Mount static files
+# Luôn Mount StaticFiles cuối cùng để tránh tranh chấp với API
 if os.path.exists(FRONTEND_DIR):
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

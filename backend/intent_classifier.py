@@ -54,7 +54,17 @@ _FOLLOWUP_RE = re.compile(
         # Tiếp nối câu trước
         ti[eế]p\s+theo | sau\s+đ[oó] | c[oò]n\s+g[ìi]\s+n[uữ]a | v[aà]\s+c[oò]n |
         # Hỏi ngắn mơ hồ (cần history mới hiểu)
-        n[oó]\s+l[aà]\s+g[ìi] | c[aá]i\s+đ[oó] | đi[eề]u\s+đ[oó] | ph[aầ]n\s+đ[oó]
+        n[oó]\s+l[aà]\s+g[ìi] | c[aá]i\s+đ[oó] | đi[eề]u\s+đ[oó] | ph[aầ]n\s+đ[oó] |
+        # === BỔ SUNG: Các câu phản hồi "chưa đủ / muốn thêm" ===
+        ch[uư]a\s+(đ[uủ]|đ[aầ]y\s+đ[uủ]|r[oõ]) |       # chưa đủ, chưa đầy đủ, chưa rõ
+        h[ìi]nh\s+nh[uư]\s+thi[eế]u | h[ìi]nh\s+nh[uư]\s+ch[uư]a |  # hình như thiếu, hình như chưa
+        thi[eế]u\s+(th[oô]ng\s+tin|ph[aầ]n|m[uụ]c|n[oộ]i\s+dung) |  # thiếu thông tin/phần/mục
+        th[eê]m\s+(đi|n[uữ]a|th[oô]ng\s+tin) |            # thêm đi, thêm nữa, thêm thông tin
+        mu[oố]n\s+(bi[eế]t|xem|đ[oọ]c)\s+thêm |           # muốn biết/xem thêm
+        c[oó]\s+g[ìi]\s+(kh[aá]c|thêm|n[uữ]a) |           # có gì khác/thêm/nữa
+        đ[aã]\s+(h[eế]t|xong)\s+ch[uư]a |                 # đã hết/xong chưa
+        c[oò]n\s+(n[uữ]a|kh[oô]ng|g[ìi]) |               # còn nữa, còn không, còn gì
+        b[oổ]\s+sung | đ[aầ]y\s+đ[uủ]\s+h[oơ]n           # bổ sung, đầy đủ hơn
     )
     """,
     re.VERBOSE | re.IGNORECASE,

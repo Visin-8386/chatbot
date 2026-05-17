@@ -331,6 +331,7 @@ def _prepare_context_and_sources(search_results: List[Dict], max_context_chars: 
             seen_sources.add(source_key)
             source_entry = {
                 "file": source,
+                "text": res["text"],
                 "similarity": similarity
             }
             if page:
@@ -380,6 +381,24 @@ def _build_history_text(history: List[Dict]) -> str:
             lines.append(f"Lượt {idx} - Trợ lý: {assistant_text}")
     return "\n".join(lines)
 
+def _load_skills() -> str:
+    """Tự động nạp tất cả các kỹ năng (skills) từ thư mục skills/."""
+    skills_content = []
+    skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+    if os.path.exists(skills_dir):
+        for filename in os.listdir(skills_dir):
+            if filename.endswith(".md"):
+                try:
+                    with open(os.path.join(skills_dir, filename), "r", encoding="utf-8") as f:
+                        skills_content.append(f.read())
+                except Exception as e:
+                    logger.warning(f"Không thể nạp skill {filename}: {e}")
+    
+    if not skills_content:
+        return ""
+    
+    return "\n\n--- HƯỚNG DẪN KỸ NĂNG BỔ SUNG ---\n" + "\n\n".join(skills_content)
+
 
 def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = False, history: List[Dict] | None = None) -> Dict:
     """
@@ -403,14 +422,16 @@ def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = 
 
     # Simplified prompt — small models work better with direct instructions
     system_msg = (
-        "Bạn là trợ lý AI nội bộ của công ty. "
-        "Trả lời câu hỏi dựa trên tài liệu được cung cấp. "
-        "Có thể tham chiếu hội thoại trước đó để hiểu ngữ cảnh câu hỏi hiện tại. "
-        "Chỉ dùng thông tin có trong tài liệu. "
-        "Nếu tài liệu không đủ dữ kiện để kết luận, phải nói rõ 'Không tìm thấy thông tin trong tài liệu được cung cấp'. "
-        "Không suy diễn ngoài tài liệu. "
-        "Trả lời bằng tiếng Việt, ngắn gọn, rõ ràng."
+        "Bạn là TRỢ LÝ TRA CỨU TÀI LIỆU DOANH NGHIỆP chuyên nghiệp và nghiêm ngặt. "
+        "NHIỆM VỤ: Chỉ cung cấp thông tin CHÍNH XÁC có trong TÀI LIỆU CUNG CẤP. "
+        "PHẠM VI: Bạn KHÔNG ĐƯỢC PHÉP sử dụng kiến thức bên ngoài, không giải quyết các vấn đề ngoài lề như lập trình, nấu ăn, hay đời sống. "
+        "CÔNG THỨC TRẢ LỜI: Nếu thông tin có trong tài liệu -> Trả lời kèm trích dẫn [Tên_file - Trang]. "
+        "Nếu KHÔNG có thông tin -> Trả lời nguyên văn: 'Xin lỗi, tôi là trợ lý tra cứu tài liệu doanh nghiệp. Câu hỏi này nằm ngoài phạm vi tài liệu hiện có nên tôi không thể hỗ trợ.' "
+        "Ngôn ngữ: Tiếng Việt, ngắn gọn, trung thực."
     )
+    
+    # Nạp thêm kỹ năng chuyên gia
+    system_msg += _load_skills()
 
     user_msg = (
         f"HỘI THOẠI GẦN ĐÂY:\n{history_text}\n\n"
@@ -464,9 +485,11 @@ def generate_answer_stream(query: str, search_results: List[Dict], strict_mode: 
     history_text = _build_history_text(normalized_history)
 
     system_msg = (
-        "Bạn là trợ lý AI nội bộ của công ty. Trả lời dựa trên tài liệu cung cấp. "
-        "Chỉ dùng thông tin có trong tài liệu. Trả lời ngắn gọn, rõ ràng bằng tiếng Việt."
+        "Bạn là TRỢ LÝ TRA CỨU TÀI LIỆU DOANH NGHIỆP. Chỉ trả lời dựa trên tài liệu cung cấp. "
+        "Nếu ngoài phạm vi, hãy từ chối trả lời một cách lịch sự nhưng nghiêm ngặt."
     )
+    # Nạp thêm kỹ năng chuyên gia
+    system_msg += _load_skills()
     if strict_mode:
         system_msg += " Chỉ trả lời đúng ý chính, không giải thích dài dòng."
 

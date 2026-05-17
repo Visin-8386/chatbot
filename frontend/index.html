@@ -368,7 +368,7 @@
                                     const srcContainer = msgEl.querySelector('.sources-container');
                                     srcContainer.classList.remove('hidden');
                                     msgEl.querySelector('.chips').innerHTML = data.sources.map(s => `
-                                        <div class="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-[10px] text-slate-600 truncate max-w-[200px] cursor-help" title="${s.text.replace(/"/g, '&quot;')}">
+                                        <div class="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-[10px] text-slate-600 truncate max-w-[200px] cursor-help" title="${(s.text || "").replace(/"/g, '&quot;')}">
                                             <i class="fa-solid fa-file-lines text-indigo-400 mr-1"></i>
                                             ${s.file} ${s.page ? `(Trang ${s.page})` : ''}
                                         </div>
