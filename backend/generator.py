@@ -381,23 +381,35 @@ def _build_history_text(history: List[Dict]) -> str:
             lines.append(f"Lượt {idx} - Trợ lý: {assistant_text}")
     return "\n".join(lines)
 
+_skills_cache: Optional[str] = None
+
+
 def _load_skills() -> str:
-    """Tự động nạp tất cả các kỹ năng (skills) từ thư mục skills/."""
+    """Tự động nạp tất cả các kỹ năng (skills) từ thư mục skills/.
+    
+    Kết quả được cache sau lần đọc đầu tiên để tránh I/O disk mỗi lần generate.
+    """
+    global _skills_cache
+    if _skills_cache is not None:
+        return _skills_cache
+
     skills_content = []
     skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
     if os.path.exists(skills_dir):
-        for filename in os.listdir(skills_dir):
+        for filename in sorted(os.listdir(skills_dir)):
             if filename.endswith(".md"):
                 try:
                     with open(os.path.join(skills_dir, filename), "r", encoding="utf-8") as f:
                         skills_content.append(f.read())
                 except Exception as e:
-                    logger.warning(f"Không thể nạp skill {filename}: {e}")
-    
-    if not skills_content:
-        return ""
-    
-    return "\n\n--- HƯỚNG DẪN KỸ NĂNG BỔ SUNG ---\n" + "\n\n".join(skills_content)
+                    logger.warning("Không thể nạp skill {}: {}", filename, e)
+
+    _skills_cache = (
+        "\n\n--- HƯỚNG DẪN KỸ NĂNG BỔ SUNG ---\n" + "\n\n".join(skills_content)
+        if skills_content else ""
+    )
+    logger.info("Skills cache built: {} file(s) loaded.", len(skills_content))
+    return _skills_cache
 
 
 def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = False, history: List[Dict] | None = None) -> Dict:

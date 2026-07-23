@@ -100,3 +100,7 @@ CORS_ORIGINS = _parse_csv_env(
 # Server
 HOST = "0.0.0.0"
 PORT = 8000
+
+# Rate Limiting (per IP, in-memory sliding window)
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "30"))
+RATE_LIMIT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))

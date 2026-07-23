@@ -438,17 +438,27 @@
                     return;
                 }
 
-                sessionsListEl.innerHTML = data.sessions.map(s => `
-                    <div class="group flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 cursor-pointer transition-colors ${s.session_id === currentSessionId ? 'bg-slate-800' : ''}" onclick="switchSession('${s.session_id}')">
+                sessionsListEl.innerHTML = data.sessions.map(s => {
+                    const rawTitle = s.title || s.last_query || '';
+                    const displayTitle = rawTitle.length > 0
+                        ? rawTitle.substring(0, 45) + (rawTitle.length > 45 ? '…' : '')
+                        : s.session_id.substring(0, 8);
+                    const isActive = s.session_id === currentSessionId;
+                    const turns = s.turn_count || 0;
+                    return `
+                    <div class="group flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 cursor-pointer transition-colors ${isActive ? 'bg-slate-800' : ''}" onclick="switchSession('${s.session_id}')">
                         <div class="flex items-center gap-2 overflow-hidden">
-                            <i class="fa-regular fa-message text-[10px] ${s.session_id === currentSessionId ? 'text-indigo-400' : 'text-slate-500'}"></i>
-                            <span class="text-xs text-slate-300 truncate">${s.last_query || s.session_id.substring(0,8)}</span>
+                            <i class="fa-regular fa-message text-[10px] ${isActive ? 'text-indigo-400' : 'text-slate-500'}"></i>
+                            <div class="overflow-hidden">
+                                <span class="text-xs text-slate-300 truncate block" title="${escapeHtml(rawTitle)}">${escapeHtml(displayTitle)}</span>
+                                <span class="text-[9px] text-slate-600">${turns} lượt</span>
+                            </div>
                         </div>
-                        <button onclick="deleteSession(event, '${s.session_id}')" class="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onclick="deleteSession(event, '${s.session_id}')" class="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity ml-1 shrink-0">
                             <i class="fa-solid fa-trash text-[10px]"></i>
                         </button>
                     </div>
-                `).join('');
+                `}).join('');
             } catch (e) {
                 console.error(e);
             }
