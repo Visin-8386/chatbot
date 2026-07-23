@@ -166,25 +166,41 @@ def _run_chat_stream(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_
             yield chunk["choices"][0]["delta"]["content"]
 
 
-def rewrite_query(query: str) -> str:
-    """Rewrite user query into a concise retrieval-friendly query."""
+def rewrite_query(query: str, history: List[Dict] | None = None) -> str:
+    """Rewrite user query into a concise retrieval-friendly query, taking history into account."""
     clean_query = query.strip()
     if not clean_query:
         return ""
 
+    history_text = ""
+    if history:
+        normalized = _normalize_history(history)
+        if normalized:
+            lines = []
+            for turn in normalized[-2:]:
+                if turn.get("user"):
+                    lines.append(f"User: {turn['user']}")
+                if turn.get("assistant"):
+                    short_ans = turn["assistant"].split("\n\n\U0001f4cc")[0][:150]
+                    lines.append(f"Bot: {short_ans}")
+            if lines:
+                history_text = "Lịch sử hội thoại gần nhất:\n" + "\n".join(lines) + "\n\n"
+
     system_msg = (
-        "Bạn là bộ tối ưu truy vấn tìm kiếm tài liệu nội bộ. "
-        "Viết lại câu hỏi ngắn gọn, giữ nguyên ý định, bỏ từ dư thừa. "
-        "Trả về đúng một câu truy vấn, không giải thích."
+        "Bạn là bộ tối ưu truy vấn tìm kiếm tài liệu doanh nghiệp. "
+        "Nhiệm vụ: Dựa vào lịch sử hội thoại (nếu có) và câu hỏi mới nhất, hãy viết lại thành MỘT CÂU TRUY VẤN TÌM KIẾM ĐẦY ĐỦ Ý VÀ NGỮ CẢNH. "
+        "Ví dụ: Lịch sử 'nghỉ phép 12 ngày/năm', câu mới 'còn gì nữa k' -> Viết lại: 'Các quy định bổ sung về chế độ và thủ tục xin nghỉ phép năm'. "
+        "Trả về đúng 1 câu truy vấn duy nhất, không thêm giải thích hay dấu ngoặc."
     )
-    user_msg = f"Truy vấn gốc: {clean_query}"
+    user_msg = f"{history_text}Câu hỏi mới nhất: {clean_query}"
     try:
+        max_tokens = REWRITE_MAX_NEW_TOKENS + (16 if history_text else 0)
         rewritten = _run_chat(
             [
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_msg}
             ],
-            max_new_tokens=REWRITE_MAX_NEW_TOKENS,
+            max_new_tokens=max_tokens,
             strict=True
         )
         rewritten = rewritten.splitlines()[0].strip() if rewritten else clean_query

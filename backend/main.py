@@ -168,13 +168,22 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
         }
 
     is_followup = (intent == "followup")
+
+    # 0b. History selection (early fetch so rewrite_query and retrieval have full context)
+    effective_history: list = []
+    if ENABLE_PERSISTENT_MEMORY and request.session_id:
+        db_history = await run_in_threadpool(get_history, request.session_id)
+        effective_history = db_history if is_followup else select_relevant_history(request.query, db_history)
+    elif request.history:
+        effective_history = request.history if is_followup else select_relevant_history(request.query, request.history)
+
     rewritten_query = request.query.strip()
 
-    # 1. Query Rewrite
+    # 1. Query Rewrite (with history context for follow-up queries)
     rewrite_start = time.perf_counter()
     if ENABLE_QUERY_REWRITE:
         try:
-            rewritten_query = await run_in_threadpool(rewrite_query, request.query)
+            rewritten_query = await run_in_threadpool(rewrite_query, request.query, effective_history)
         except Exception as e:
             logger.error("Query rewrite error: {}", e)
             rewritten_query = request.query.strip()
@@ -235,10 +244,10 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
                 }
             }
 
-    # 4. CRAG
+    # 4. CRAG (Evaluate relevance against rewritten_query to handle follow-up context)
     crag_verdict = "skipped"  # default; overwritten below
     crag_start = time.perf_counter()
-    crag_result = await run_in_threadpool(crag_check_relevance, request.query, results)
+    crag_result = await run_in_threadpool(crag_check_relevance, rewritten_query, results)
     timings_ms["crag"] = round((time.perf_counter() - crag_start) * 1000, 1)
     crag_verdict = crag_result["verdict"]
     filtered_results = crag_result["filtered_results"]
@@ -260,14 +269,6 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
             "timings_ms": {**timings_ms, "generate": 0.0, "self_check": 0.0,
                            "total": round((time.perf_counter() - total_start) * 1000, 1)}
         }
-
-    # 5. History selection
-    effective_history: list = []
-    if ENABLE_PERSISTENT_MEMORY and request.session_id:
-        db_history = await run_in_threadpool(get_history, request.session_id)
-        effective_history = db_history if is_followup else select_relevant_history(request.query, db_history)
-    elif request.history:
-        effective_history = request.history if is_followup else select_relevant_history(request.query, request.history)
 
     return {
         "_early_exit": False,

@@ -19,8 +19,9 @@ IntentType = Literal["chitchat", "followup", "rag_query"]
 _CHITCHAT_RE = re.compile(
     r"""
     ^\s*(
-        # Chào hỏi
-        (xin\s+)?ch[àa]o\b | hi\b | hello\b | hey\b | yo\b |
+        # Chào hỏi (bao gồm gõ sai / không dấu: chòa, chaò, chao, xin chao, hế lô, helo...)
+        (xin\s+)?ch[àaòóaôöôóo][oàaòóaôöôóo]?\b | chòa\b | chaò\b | chao\b | xinchao\b |
+        hi+\b | he+llo+\b | he+lo+\b | hế\s*lô\b | yo+\b | al+o+\b | alô\b |
         good\s*(morning|afternoon|evening) | chúc\s+(buổi|ngày) |
         # Cảm ơn
         c[aả]m\s+[oơ]n | c[aá]m\s+[oơ]n | thanks?\b | thank\s+you | merci | ty\b |
