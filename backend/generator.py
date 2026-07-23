@@ -225,10 +225,14 @@ def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict
     scores = reranker.predict(pairs, batch_size=len(pairs), show_progress_bar=False)
 
     for i, res in enumerate(results):
-        res["rerank_score"] = float(scores[i])
-        res["similarity"] = round(float(torch.sigmoid(torch.tensor(scores[i])).item()) * 100, 1)
+        raw_score = float(scores[i])
+        res["rerank_score"] = raw_score
+        rerank_sim = float(torch.sigmoid(torch.tensor(raw_score)).item()) * 100
+        orig_sim = float(res.get("similarity", 50.0))
+        # Fuse scores: 50% Cross-Encoder + 50% Hybrid Vector+BM25 similarity
+        res["similarity"] = round(0.5 * rerank_sim + 0.5 * orig_sim, 1)
 
-    results.sort(key=lambda x: x["rerank_score"], reverse=True)
+    results.sort(key=lambda x: (x["similarity"], x["rerank_score"]), reverse=True)
     return results[:top_n]
 
 

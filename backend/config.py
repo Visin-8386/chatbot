@@ -51,28 +51,28 @@ MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "6"))
 
 # Agentic-lite controls
 ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "0") == "1"
-ENABLE_CLARIFICATION_GATE = os.getenv("ENABLE_CLARIFICATION_GATE", "1") == "1"
+ENABLE_CLARIFICATION_GATE = os.getenv("ENABLE_CLARIFICATION_GATE", "0") == "1"
 ENABLE_SELF_CHECK = os.getenv("ENABLE_SELF_CHECK", "0") == "1"
 
 # Giai đoạn 2: Agentic RAG
 ENABLE_HYDE = os.getenv("ENABLE_HYDE", "0") == "1"                       # 2.1 Query Expansion
-CRAG_RELEVANCE_THRESHOLD = float(os.getenv("CRAG_RELEVANCE_THRESHOLD", "40"))  # 2.2 CRAG gate (%) - giảm để ít reject hơn
+CRAG_RELEVANCE_THRESHOLD = float(os.getenv("CRAG_RELEVANCE_THRESHOLD", "30"))  # 2.2 CRAG gate (%)
 ENABLE_PERSISTENT_MEMORY = os.getenv("ENABLE_PERSISTENT_MEMORY", "1") == "1"   # 2.3 SQLite memory
 
 # Search
 TOP_K = int(os.getenv("TOP_K", "6"))                 # number of results to return
 ENABLE_CONTEXT_EXPANSION = os.getenv("ENABLE_CONTEXT_EXPANSION", "1") == "1" # Tự động lấy chunk trước/sau
-SIMILARITY_THRESHOLD = 40 # minimum similarity % to include in results
+SIMILARITY_THRESHOLD = 30 # minimum similarity % to include in results
 RETRIEVAL_CANDIDATE_MULTIPLIER = int(os.getenv("RETRIEVAL_CANDIDATE_MULTIPLIER", "4"))
 RERANK_EMBEDDING_WEIGHT = float(os.getenv("RERANK_EMBEDDING_WEIGHT", "0.75"))
 RERANK_KEYWORD_WEIGHT = float(os.getenv("RERANK_KEYWORD_WEIGHT", "0.25"))
 # Truncate chunk text khi rerank: 300 chars (~60-80 tokens) đủ để judge relevance
 RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "300"))
 
-# Nới lỏng Clarification Gate: tài liệu kỹ thuật thường có nhiều kết quả gần nhau là bình thường
-CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "35"))  # Giảm từ 45 -> 35
-CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "2"))               # Giảm từ 4 -> 2
-CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "60"))   # Giảm từ 75 -> 60
+# Clarification Gate Thresholds
+CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "25"))
+CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "0.5"))
+CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "40"))
 SELF_CHECK_MIN_GROUNDEDNESS = float(os.getenv("SELF_CHECK_MIN_GROUNDEDNESS", "0.35"))
 
 # Generation speed controls
