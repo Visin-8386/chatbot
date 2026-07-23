@@ -156,17 +156,20 @@ def classify_intent(query: str, has_history: bool = False) -> Dict:
     if _CHITCHAT_RE.match(q):
         return {"intent": "chitchat", "confidence": "high", "reason": "chitchat_pattern"}
 
-    # 2. Câu quá ngắn + có history → follow-up
-    word_count = len(q.split())
-    if word_count <= 5 and has_history:
-        if _FOLLOWUP_RE.search(q):
-            return {"intent": "followup", "confidence": "high", "reason": "followup_pattern_short"}
-        # Câu ngắn mơ hồ với history → coi là follow-up
-        return {"intent": "followup", "confidence": "low", "reason": "short_with_history"}
-
-    # 3. Follow-up pattern rõ ràng
-    if _FOLLOWUP_RE.match(q):
+    # 2. Follow-up pattern rõ ràng (chứa từ nối / đại từ tham chiếu)
+    if _FOLLOWUP_RE.search(q):
         return {"intent": "followup", "confidence": "high", "reason": "followup_pattern"}
 
-    # 4. Mặc định: RAG query
+    # 3. Nếu chứa các danh từ / từ khóa tra cứu rõ ràng (quy định, nghỉ phép, mã, hướng dẫn...) -> RAG Query
+    topic_keywords = ("quy định", "quy trình", "chính sách", "hướng dẫn", "mã", "thiết bị", "báo cáo", "nghỉ phép", "lương", "thưởng", "bảo hiểm", "bảo trì")
+    q_lower = q.lower()
+    if any(kw in q_lower for kw in topic_keywords):
+        return {"intent": "rag_query", "confidence": "high", "reason": "topic_keyword_rag"}
+
+    # 4. Chỉ khi câu ngắn mơ hồ KHÔNG có từ khóa danh từ VÀ có history mới coi là follow-up
+    word_count = len(q.split())
+    if word_count <= 3 and has_history:
+        return {"intent": "followup", "confidence": "low", "reason": "short_ambiguous_with_history"}
+
+    # 5. Mặc định: RAG query
     return {"intent": "rag_query", "confidence": "high", "reason": "default_rag"}
