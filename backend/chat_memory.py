@@ -82,9 +82,10 @@ def save_turn(session_id: str, user_msg: str, assistant_msg: str) -> None:
             "INSERT INTO chat_turns (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
             (session_id, "user", user_msg, ts)
         )
+        # assistant slightly after user so ORDER BY created_at,id is deterministic
         conn.execute(
             "INSERT INTO chat_turns (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (session_id, "assistant", assistant_msg, ts + 0.001)
+            (session_id, "assistant", assistant_msg, ts + 0.0001)
         )
         # Upsert session meta — title = first user message (truncated)
         title = user_msg[:80].strip()
@@ -115,18 +116,18 @@ def get_history(session_id: str, max_turns: Optional[int] = None) -> List[Dict]:
 
     limit = (max_turns or MAX_HISTORY_TURNS) * 2  # *2 vì mỗi lượt có 2 rows
     conn = _get_conn()
+    # Subquery: take the LAST `limit` rows by id DESC, then re-sort ASC
     rows = conn.execute(
         """
-        SELECT role, content FROM chat_turns
-        WHERE session_id = ?
-        ORDER BY created_at DESC
-        LIMIT ?
+        SELECT role, content FROM (
+            SELECT id, role, content FROM chat_turns
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ) ORDER BY id ASC
         """,
         (session_id, limit)
     ).fetchall()
-
-    # Đảo ngược để có thứ tự chronological
-    rows = list(reversed(rows))
 
     # Ghép cặp user-assistant
     turns = []
