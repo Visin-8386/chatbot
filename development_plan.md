@@ -34,8 +34,8 @@ Bản kế hoạch này tập trung vào việc khai thác tối đa sức mạn
 
 - [x] **3.1. GraphRAG-lite Integration:** Knowledge Graph SQLite (`backend/graph_store.py`) + 1-hop expansion cho query tổng hợp, opt-in qua `ENABLE_GRAPH_RAG` (mặc định 0 để an toàn VRAM). Full community-detection GraphRAG vẫn để dành khi có GPU lớn hơn.
     - *Lợi ích:* Trả lời được các câu hỏi mang tính tổng hợp trên hàng nghìn tài liệu (Ví dụ: "Tổng hợp các thay đổi về chính sách lương trong 5 năm qua").
-- [ ] **3.2. Evaluation Suite (Ragas):** Tự động chấm điểm hệ thống dựa trên: Faithfulness (Độ trung thực), Answer Relevance (Độ liên quan), Context Precision (Độ chính xác ngữ cảnh).
-- [ ] **3.3. Observability (Trace):** Tích hợp công cụ theo dõi luồng xử lý để biết chính xác mô hình đang "nghĩ" gì ở từng bước.
+- [x] **3.2. Evaluation Suite (Ragas-style offline):** `tests/evaluate_pipeline.py` chấm Faithfulness / Answer Relevance / Context Precision bằng chính LLM local trên dataset 12 queries (`eval_report.json`).
+- [x] **3.3. Observability (Trace):** `logs/traces.jsonl` + `GET /api/traces` (lọc/phân trang) + forward opt-in sang Langfuse self-host (`backend/langfuse_hook.py`); mọi response đều có `timings_ms` từng bước pipeline.
 
 ---
 *Lộ trình được thiết kế để triển khai từng bước, mỗi bước hoàn thành sẽ thấy ngay sự thay đổi về chất lượng câu trả lời.*

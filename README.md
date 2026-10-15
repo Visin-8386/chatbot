@@ -221,6 +221,20 @@ python tests/test_api_modes.py mode_fast
 python tests/test_api_modes.py mode_llm
 ```
 
+Test offline không cần GPU/LLM (graph, fusion, traces, auth/jobs, chunking, intent):
+
+```bash
+pytest -q tests/test_graph_rag.py tests/test_hybrid_fusion.py tests/test_trace_logger.py tests/test_auth_jobs.py tests/test_chunking.py tests/test_intent_classifier.py
+```
+
+## 🏭 Vận Hành Production
+
+- **RBAC-lite:** `API_READ_KEYS` (được GET/search) vs `API_WRITE_KEYS` (được cả upload/xóa); `API_KEY` giữ full-quyền tương thích ngược.
+- **Upload nặng:** bật `ENABLE_ASYNC_INGEST=1` để `/api/upload` trả `job_id`, poll tại `/api/jobs/{job_id}` (job in-process 1 worker, không cần Redis).
+- **Quan sát:** `GET /api/traces?q=...` đọc trace mới nhất; bật `LANGFUSE_ENABLED=1` để forward sang Langfuse self-host.
+- **Tính năng opt-in (mặc định tắt, cần upload lại tài liệu sau khi bật):** `ENABLE_GRAPH_RAG=1` (KG + 1-hop), `DOC_PARSER=docling` (`pip install docling`), `GRAPH_USE_LLM=1`.
+- **Đổi model an toàn qua env:** `LLM_MODEL` (`Sailor2-8B IQ4_XS` nhẹ nhất / `Qwen2.5-7B` rollback), `EMBEDDING_MODEL` + `VECTOR_COLLECTION=company_documents` (rollback index cũ), `RERANKER_MODEL` + `RERANKER_DEVICE=cpu` (giữ VRAM), `HYBRID_FUSION=rrf` (rollback fusion).
+
 ## 🤝 Giấy phép (License)
 Dự án được phân phối dưới giấy phép mở. Bạn hoàn toàn tự do sử dụng, chỉnh sửa, nâng cấp và áp dụng cho nội bộ công ty.
 

@@ -6,6 +6,7 @@ sentence-transformers==3.0.1
 torch>=2.2.0
 
 chromadb==0.5.5
+numpy<2  # chromadb 0.5.5 dùng np.float_ đã bị xóa trên NumPy 2.x
 
 PyPDF2==3.0.1
 python-docx==1.1.2
