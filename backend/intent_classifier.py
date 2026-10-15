@@ -20,8 +20,10 @@ _CHITCHAT_RE = re.compile(
     r"""
     ^\s*(
         # Chào hỏi (bao gồm gõ sai / không dấu: chòa, chaò, chao, xin chao, hế lô, helo...)
-        (xin\s+)?ch[àaòóaôöôóo][oàaòóaôöôóo]?\b | chòa\b | chaò\b | chao\b | xinchao\b |
-        hi+\b | he+llo+\b | he+lo+\b | hế\s*lô\b | yo+\b | al+o+\b | alô\b |
+        # Lưu ý: lớp ký tự đầu KHÔNG chứa 'o' trần để từ "cho" (cho hỏi/cho xin...)
+        # không bị nhận nhầm thành lời chào.
+        (xin\s+)?ch[àaòóaôöôó][oàaòóaôöôóo]?\b | chòa\b | chaò\b | chao\b | xinchao\b |
+        hi+\b | hey\b | he+llo+\b | he+lo+\b | hế\s*lô\b | yo+\b | al+o+\b | alô\b |
         good\s*(morning|afternoon|evening) | chúc\s+(buổi|ngày) |
         # Cảm ơn
         c[aả]m\s+[oơ]n | c[aá]m\s+[oơ]n | thanks?\b | thank\s+you | merci | ty\b |
@@ -137,6 +139,15 @@ def get_chitchat_response(text: str) -> str:
     return random.choice(_RESPONSES[category])
 
 
+# Tiền tố làm mềm câu hỏi ("ví dụ...", "cho mình hỏi..."): tước bỏ trước khi
+# dò follow-up để "ví dụ như thế nào?" khớp pattern neo-^. Không bung neo toàn
+# regex (tránh false-positive cho câu tra cứu chứa "như thế nào" giữa câu).
+_SOFTENER_PREFIX_RE = re.compile(
+    r"^(?:ví\s*dụ(?:\s*như)?|cho\s+(?:tôi|mình|em|anh|chị)?\s*hỏi|xin\s*hỏi)\s*,?\s*",
+    re.IGNORECASE,
+)
+
+
 def classify_intent(query: str, has_history: bool = False) -> Dict:
     """
     Phân loại intent của query.
@@ -156,8 +167,10 @@ def classify_intent(query: str, has_history: bool = False) -> Dict:
     if _CHITCHAT_RE.match(q):
         return {"intent": "chitchat", "confidence": "high", "reason": "chitchat_pattern"}
 
-    # 2. Follow-up pattern rõ ràng (chứa từ nối / đại từ tham chiếu)
-    if _FOLLOWUP_RE.search(q):
+    # 2. Follow-up pattern rõ ràng (chứa từ nối / đại từ tham chiếu).
+    # Tước tiền tố làm mềm ("ví dụ...", "cho mình hỏi...") trước để pattern neo-^ khớp.
+    q_follow = _SOFTENER_PREFIX_RE.sub("", q).strip() or q
+    if _FOLLOWUP_RE.search(q_follow):
         return {"intent": "followup", "confidence": "high", "reason": "followup_pattern"}
 
     # 3. Nếu chứa các danh từ / từ khóa tra cứu rõ ràng (quy định, nghỉ phép, mã, hướng dẫn...) -> RAG Query
