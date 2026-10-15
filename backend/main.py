@@ -37,6 +37,8 @@ from backend.config import (
     FASTEST_RESPONSE_MODE,
     ENABLE_HYDE,
     ENABLE_PERSISTENT_MEMORY,
+    ENABLE_GRAPH_RAG,
+    GRAPH_MAX_EXPAND,
 )
 from backend.document_processor import process_document
 from backend.vector_store import add_documents, search, delete_document, get_all_documents, get_stats
@@ -87,6 +89,12 @@ async def startup_preload():
     """Preload models and initialize DB at server start."""
     logger.info("[STARTUP] Initializing chat memory DB...")
     init_db()
+    try:
+        from backend.graph_store import init_graph_db
+        logger.info("[STARTUP] Initializing graph store...")
+        init_graph_db()
+    except Exception as e:
+        logger.warning("[STARTUP] Graph store init skipped: {}", e)
     logger.info("[STARTUP] Preloading models (LLM, Reranker, Embedding)...")
     await run_in_threadpool(preload_models)
     logger.info("[STARTUP] All systems ready.")
@@ -217,6 +225,23 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
     results = await run_in_threadpool(rerank_results, rewritten_query, results, request.top_k)
     timings_ms["rerank"] = round((time.perf_counter() - rerank_start) * 1000, 1)
 
+    # 2b. GraphRAG-lite expansion (opt-in): 1-hop entity neighbors for
+    # global/synthesis queries. Best-effort — never breaks the pipeline.
+    graph_start = time.perf_counter()
+    graph_expanded = 0
+    if ENABLE_GRAPH_RAG:
+        try:
+            from backend.graph_store import expand_with_graph, is_global_query
+            if is_global_query(rewritten_query) or not results:
+                before = len(results)
+                results = await run_in_threadpool(
+                    expand_with_graph, rewritten_query, results, GRAPH_MAX_EXPAND
+                )
+                graph_expanded = len(results) - before
+        except Exception as e:
+            logger.warning("[Graph] pipeline expansion skipped: {}", e)
+    timings_ms["graph"] = round((time.perf_counter() - graph_start) * 1000, 1)
+
     # 3. Clarification Gate
     if ENABLE_CLARIFICATION_GATE and not is_followup:
         top_similarity = results[0]["similarity"] if results else 0
@@ -286,6 +311,7 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
         "rewritten_query": rewritten_query,
         "results": filtered_results,
         "crag_verdict": crag_verdict,
+        "graph_expanded": graph_expanded,
         "effective_history": effective_history,
         "timings_ms": timings_ms,
     }
@@ -424,6 +450,7 @@ async def search_documents(request: SearchRequest, req: Request):
         "needs_clarification": False,
         "clarification_question": "",
         "crag_verdict": crag_verdict,
+        "graph_expanded": pipeline.get("graph_expanded", 0),
         "generation_mode": generation_mode,
         "self_check_status": self_check_status,
         "quality_score": round(quality_score, 3) if quality_score is not None else None,

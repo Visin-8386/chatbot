@@ -32,7 +32,7 @@ Bản kế hoạch này tập trung vào việc khai thác tối đa sức mạn
 ## 🌐 Giai đoạn 3: Hệ thống chuyên nghiệp (Scale & Enterprise)
 *Mục tiêu: Đạt chuẩn SOTA và có khả năng ứng dụng thực tế cao.*
 
-- [ ] **3.1. GraphRAG Integration:** Xây dựng bản đồ thực thể (Knowledge Graph) từ tài liệu.
+- [x] **3.1. GraphRAG-lite Integration:** Knowledge Graph SQLite (`backend/graph_store.py`) + 1-hop expansion cho query tổng hợp, opt-in qua `ENABLE_GRAPH_RAG` (mặc định 0 để an toàn VRAM). Full community-detection GraphRAG vẫn để dành khi có GPU lớn hơn.
     - *Lợi ích:* Trả lời được các câu hỏi mang tính tổng hợp trên hàng nghìn tài liệu (Ví dụ: "Tổng hợp các thay đổi về chính sách lương trong 5 năm qua").
 - [ ] **3.2. Evaluation Suite (Ragas):** Tự động chấm điểm hệ thống dựa trên: Faithfulness (Độ trung thực), Answer Relevance (Độ liên quan), Context Precision (Độ chính xác ngữ cảnh).
 - [ ] **3.3. Observability (Trace):** Tích hợp công cụ theo dõi luồng xử lý để biết chính xác mô hình đang "nghĩ" gì ở từng bước.

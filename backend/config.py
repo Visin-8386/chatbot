@@ -105,6 +105,12 @@ DOC_PARSER = os.getenv("DOC_PARSER", "auto").strip().lower()
 # Docling runs CPU-only by default (no VRAM taken from the LLM).
 DOCLING_ARTIFACTS_PATH = os.getenv("DOCLING_ARTIFACTS_PATH", os.path.join(MODELS_DIR, "docling")).strip()
 
+# Giai đoạn 3.1: GraphRAG-lite (Knowledge Graph SQLite + 1-hop expansion)
+# Mở opt-in: cần upload lại tài liệu sau khi bật để index graph.
+ENABLE_GRAPH_RAG = os.getenv("ENABLE_GRAPH_RAG", "0") == "1"
+GRAPH_MAX_EXPAND = int(os.getenv("GRAPH_MAX_EXPAND", "3"))  # chunk graph tối đa thêm vào kết quả
+GRAPH_USE_LLM = os.getenv("GRAPH_USE_LLM", "0") == "1"     # trích triple bằng LLM local (tốn 1 call/chunk lúc ingest)
+
 # Upload limits
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024

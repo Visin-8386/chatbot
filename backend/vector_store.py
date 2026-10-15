@@ -175,6 +175,16 @@ def add_documents(chunks: List[Dict], doc_id: str) -> int:
     # Rebuild BM25 to include new docs
     _initialize_bm25(force_rebuild=True)
 
+    # GraphRAG-lite: index entities/edges (opt-in, never breaks ingest on failure)
+    try:
+        from backend.config import ENABLE_GRAPH_RAG, GRAPH_USE_LLM
+        if ENABLE_GRAPH_RAG:
+            from backend.graph_store import build_from_chunks
+            source_name = metadatas[0].get("source", "") if metadatas else ""
+            build_from_chunks(doc_id, chunks, use_llm=GRAPH_USE_LLM, source_name=str(source_name))
+    except Exception as e:
+        logger.warning("Graph indexing skipped for doc {}: {}", doc_id, e)
+
     return len(chunks)
 
 
@@ -324,6 +334,13 @@ def delete_document(doc_id: str) -> int:
     """Delete all chunks belonging to a document."""
     collection = get_collection()
 
+    # GraphRAG-lite: clean graph first (best-effort, never breaks deletion)
+    try:
+        from backend.graph_store import delete_doc_graph
+        delete_doc_graph(doc_id)
+    except Exception as e:
+        logger.warning("Graph cleanup skipped for doc {}: {}", doc_id, e)
+
     # Find all chunks with this doc_id
     results = collection.get(
         where={"doc_id": doc_id},
@@ -366,10 +383,18 @@ def get_stats() -> Dict:
     """Get stats about the vector store."""
     collection = get_collection()
     docs = get_all_documents()
-    return {
+    stats = {
         "total_chunks": collection.count(),
         "total_documents": len(docs),
         "documents": docs,
         "embedding_model": EMBEDDING_MODEL,
         "collection": get_active_collection_name(),
     }
+    try:
+        from backend.config import ENABLE_GRAPH_RAG
+        if ENABLE_GRAPH_RAG:
+            from backend.graph_store import graph_stats
+            stats["graph"] = graph_stats()
+    except Exception:
+        pass
+    return stats
