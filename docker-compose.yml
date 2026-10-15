@@ -19,8 +19,25 @@ services:
               count: 1
               capabilities: [gpu]
 
-  # Future: Add Redis and Celery worker here
+  # Scale-out sau này: Redis + Celery worker riêng (hiện tại jobs chạy in-process).
+  # Khi cần multi-replica, bật 2 service dưới và thay JobManager bằng Celery
+  # mà không đổi API (/api/upload, /api/jobs/{id}).
   # redis:
   #   image: redis:alpine
   #   ports:
   #     - "6379:6379"
+  #   volumes:
+  #     - ./data/redis:/data
+  # worker:
+  #   build: .
+  #   command: celery -A backend.celery_app worker --concurrency=1
+  #   volumes:
+  #     - ./uploads:/app/uploads
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - CELERY_BROKER_URL=redis://redis:6379/0
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  #   depends_on:
+  #     - redis
+  #     - backend

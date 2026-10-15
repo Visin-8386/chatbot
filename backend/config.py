@@ -133,6 +133,13 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".txt"}
 
 # Optional API protection for internal deployments
 API_KEY = os.getenv("API_KEY", "").strip()
+# RBAC-lite: phân quyền read/write bằng key riêng (CSV). API_KEY luôn full-quyền.
+API_READ_KEYS = os.getenv("API_READ_KEYS", "").strip()
+API_WRITE_KEYS = os.getenv("API_WRITE_KEYS", "").strip()
+
+# Async ingest (in-process background jobs; không cần Redis)
+# Mặc định 0 = upload đồng bộ như cũ. Bật 1 khi parse file nặng (Docling/OCR).
+ENABLE_ASYNC_INGEST = os.getenv("ENABLE_ASYNC_INGEST", "0") == "1"
 
 # CORS
 CORS_ORIGINS = _parse_csv_env(

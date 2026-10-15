@@ -39,6 +39,9 @@ from backend.config import (
     ENABLE_PERSISTENT_MEMORY,
     ENABLE_GRAPH_RAG,
     GRAPH_MAX_EXPAND,
+    API_READ_KEYS,
+    API_WRITE_KEYS,
+    ENABLE_ASYNC_INGEST,
 )
 from backend.document_processor import process_document
 from backend.vector_store import add_documents, search, delete_document, get_all_documents, get_stats
@@ -113,12 +116,45 @@ app.add_middleware(
 
 
 async def verify_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
-    """Allow access when API_KEY is unset; otherwise require matching header."""
+    """Legacy single-key guard (giữ để tương thích ngược)."""
     if not API_KEY:
         return
 
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+async def require_read(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """Cho phép endpoint đọc: hệ mở / API_KEY / read-key / write-key."""
+    from backend.auth import is_read_allowed, parse_keys
+    if is_read_allowed(x_api_key, API_KEY, parse_keys(API_READ_KEYS), parse_keys(API_WRITE_KEYS)):
+        return
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+async def require_write(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """Cho phép endpoint ghi: hệ mở / API_KEY / write-key (read-only không đủ)."""
+    from backend.auth import is_write_allowed, parse_keys
+    if is_write_allowed(x_api_key, API_KEY, parse_keys(API_READ_KEYS), parse_keys(API_WRITE_KEYS)):
+        return
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _ingest_saved_file(file_path: str, filename: str, doc_id: str) -> dict:
+    """Parse + index 1 file đã lưu đĩa. Dùng chung cho sync và async ingest."""
+    chunks = process_document(file_path)
+    if not chunks:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise ValueError("No text content found in the document.")
+    num_chunks = add_documents(chunks, doc_id)
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "filename": filename,
+        "chunks": num_chunks,
+        "message": f"Successfully processed '{filename}' into {num_chunks} chunks."
+    }
 
 
 # --- Request Models ---
@@ -317,9 +353,9 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
     }
 
 
-@app.post("/api/upload", dependencies=[Depends(verify_api_key)])
+@app.post("/api/upload", dependencies=[Depends(require_write)])
 async def upload_document(file: UploadFile = File(...)):
-    """Upload and process a document."""
+    """Upload and process a document (sync mặc định; async job khi ENABLE_ASYNC_INGEST=1)."""
     # Validate file type
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -330,9 +366,10 @@ async def upload_document(file: UploadFile = File(...)):
 
     # Generate unique doc ID
     doc_id = str(uuid.uuid4())[:8]
+    filename = file.filename
 
     # Save file
-    file_path = os.path.join(UPLOAD_DIR, f"{doc_id}_{file.filename}")
+    file_path = os.path.join(UPLOAD_DIR, f"{doc_id}_{filename}")
     try:
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
@@ -348,22 +385,25 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
-    # Process document
-    try:
-        chunks = process_document(file_path)
-        if not chunks:
-            os.remove(file_path)
-            raise HTTPException(status_code=400, detail="No text content found in the document.")
-
-        num_chunks = add_documents(chunks, doc_id)
-        
+    # Async path: enqueue background job (1 worker để an toàn RAM/VRAM)
+    if ENABLE_ASYNC_INGEST:
+        from backend.jobs import job_manager
+        job_id = job_manager.submit(
+            f"ingest:{filename}",
+            lambda: _ingest_saved_file(file_path, filename, doc_id),
+        )
         return {
             "success": True,
+            "async": True,
+            "job_id": job_id,
             "doc_id": doc_id,
-            "filename": file.filename,
-            "chunks": num_chunks,
-            "message": f"Successfully processed '{file.filename}' into {num_chunks} chunks."
+            "filename": filename,
+            "message": f"Upload received. Track progress at /api/jobs/{job_id}."
         }
+
+    # Process document (sync — hành vi cũ)
+    try:
+        return _ingest_saved_file(file_path, filename, doc_id)
     except ValueError as e:
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -374,7 +414,17 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
 
-@app.post("/api/search", dependencies=[Depends(verify_api_key)])
+@app.get("/api/jobs/{job_id}", dependencies=[Depends(require_read)])
+async def get_job_status(job_id: str):
+    """Trạng thái background ingest job (queued/running/done/error)."""
+    from backend.jobs import job_manager
+    job = await run_in_threadpool(job_manager.get, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
+
+
+@app.post("/api/search", dependencies=[Depends(require_read)])
 async def search_documents(request: SearchRequest, req: Request):
     """Search for relevant document chunks (non-streaming)."""
     _check_rate_limit(req.client.host if req.client else "unknown")
@@ -464,7 +514,7 @@ async def search_documents(request: SearchRequest, req: Request):
     return response_data
 
 
-@app.post("/api/search/stream", dependencies=[Depends(verify_api_key)])
+@app.post("/api/search/stream", dependencies=[Depends(require_read)])
 async def search_documents_stream(request: SearchRequest, req: Request):
     """Search and stream AI answer tokens (SSE), fully equipped with Agentic features."""
     _check_rate_limit(req.client.host if req.client else "unknown")
@@ -529,14 +579,14 @@ async def search_documents_stream(request: SearchRequest, req: Request):
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
 
-@app.get("/api/documents", dependencies=[Depends(verify_api_key)])
+@app.get("/api/documents", dependencies=[Depends(require_read)])
 async def list_documents():
     """List all uploaded documents."""
     docs = get_all_documents()
     return {"documents": docs, "total": len(docs)}
 
 
-@app.delete("/api/documents/{doc_id}", dependencies=[Depends(verify_api_key)])
+@app.delete("/api/documents/{doc_id}", dependencies=[Depends(require_write)])
 async def remove_document(doc_id: str):
     """Delete a document and its chunks."""
     # Delete from vector store
@@ -560,13 +610,13 @@ async def remove_document(doc_id: str):
     }
 
 
-@app.get("/api/stats", dependencies=[Depends(verify_api_key)])
+@app.get("/api/stats", dependencies=[Depends(require_read)])
 async def system_stats():
     """Get system statistics."""
     return get_stats()
 
 
-@app.get("/api/traces", dependencies=[Depends(verify_api_key)])
+@app.get("/api/traces", dependencies=[Depends(require_read)])
 async def list_traces(limit: int = 50, offset: int = 0, q: Optional[str] = None):
     """Đọc traces RAG mới nhất (observability lite từ logs/traces.jsonl)."""
     from backend.trace_logger import read_traces
@@ -576,21 +626,21 @@ async def list_traces(limit: int = 50, offset: int = 0, q: Optional[str] = None)
 
 # --- Session / Memory Endpoints (2.3) ---
 
-@app.get("/api/sessions", dependencies=[Depends(verify_api_key)])
+@app.get("/api/sessions", dependencies=[Depends(require_read)])
 async def list_sessions():
     """Liệt kê tất cả session đã có trong bộ nhớ."""
     sessions = await run_in_threadpool(get_all_sessions)
     return {"sessions": sessions, "total": len(sessions)}
 
 
-@app.get("/api/sessions/{session_id}/history", dependencies=[Depends(verify_api_key)])
+@app.get("/api/sessions/{session_id}/history", dependencies=[Depends(require_read)])
 async def get_session_history(session_id: str, max_turns: Optional[int] = None):
     """Lấy lịch sử hội thoại của một session."""
     history = await run_in_threadpool(get_history, session_id, max_turns)
     return {"session_id": session_id, "history": history, "turns": len(history)}
 
 
-@app.delete("/api/sessions/{session_id}", dependencies=[Depends(verify_api_key)])
+@app.delete("/api/sessions/{session_id}", dependencies=[Depends(require_write)])
 async def clear_session(session_id: str):
     """Xóa toàn bộ lịch sử của một session."""
     deleted = await run_in_threadpool(delete_session, session_id)
