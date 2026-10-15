@@ -29,8 +29,20 @@ def _parse_csv_env(name: str, default: List[str]) -> List[str]:
 	values = [item.strip() for item in raw_value.split(",") if item.strip()]
 	return values or default
 
-# Embedding Model
-EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+# Embedding Model (SOTA Vietnamese default; free + offline after first download)
+# AITeamVN/Vietnamese_Embedding_v2: fine-tuned from bge-m3, 1024 dims, Apache-2.0.
+# Rollback via env: EMBEDDING_MODEL=intfloat/multilingual-e5-small (384 dims).
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "AITeamVN/Vietnamese_Embedding_v2")
+# E5-family needs "query:/passage:" prefixes; bge-m3-based Vietnamese models do not.
+# Auto-detect: enabled only when model name contains "e5" unless explicitly overridden.
+_EMBEDDING_PREFIX_ENV = os.getenv("EMBEDDING_USE_E5_PREFIX", "").strip()
+EMBEDDING_USE_E5_PREFIX = (
+    _EMBEDDING_PREFIX_ENV == "1" if _EMBEDDING_PREFIX_ENV
+    else "e5" in EMBEDDING_MODEL.lower()
+)
+# Vector collection is versioned per embedding model so a dimension change
+# (384 -> 1024) never corrupts the old index. Pin via VECTOR_COLLECTION to rollback.
+VECTOR_COLLECTION = os.getenv("VECTOR_COLLECTION", "").strip()  # empty = auto from EMBEDDING_MODEL
 
 # LLM Model (GGUF Version for Speed & Efficiency)
 # SOTA safe default: Sailor2-8B-Chat Q4_K_S (~4.99GB) — SEA/Vietnamese-tuned,

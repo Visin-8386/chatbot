@@ -16,11 +16,31 @@ from backend.config import (
     SIMILARITY_THRESHOLD,
     RETRIEVAL_CANDIDATE_MULTIPLIER,
     ENABLE_CONTEXT_EXPANSION,
+    EMBEDDING_MODEL,
+    VECTOR_COLLECTION,
 )
 from backend.embedding_service import embed_passages, embed_query
 
-# Collection name
-COLLECTION_NAME = "company_documents"
+# Collection name is versioned per embedding model: changing embedding dims
+# (e5-small 384 -> Vietnamese_Embedding_v2 1024) creates a NEW collection
+# instead of corrupting the old index. Old data stays on disk for rollback.
+# Pin via VECTOR_COLLECTION env to force the legacy name ("company_documents").
+BASE_COLLECTION_NAME = "company_documents"
+
+
+def _slugify_model(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug[-48:] if len(slug) > 48 else slug
+
+
+def get_active_collection_name() -> str:
+    if VECTOR_COLLECTION:
+        return VECTOR_COLLECTION
+    return f"{BASE_COLLECTION_NAME}-{_slugify_model(EMBEDDING_MODEL)}"
+
+
+# Legacy name (e5-small era) — kept for rollback via VECTOR_COLLECTION=company_documents
+COLLECTION_NAME = get_active_collection_name()
 
 # Global client
 _client = None
@@ -45,7 +65,9 @@ _bm25_docs = [] # Stores (text, metadata) pairs corresponding to index
 
 
 def _get_bm25_path():
-    return os.path.join(CHROMA_DIR, "bm25_index.pkl")
+    # BM25 index is per-collection so the embedding switch never mixes old/new docs.
+    safe = re.sub(r"[^a-z0-9_-]+", "_", get_active_collection_name().lower())
+    return os.path.join(CHROMA_DIR, f"bm25_index_{safe}.pkl")
 
 
 def _initialize_bm25(force_rebuild: bool = False):
@@ -96,7 +118,7 @@ def _initialize_bm25(force_rebuild: bool = False):
 
 
 def get_collection():
-    """Get or create the ChromaDB collection."""
+    """Get or create the ChromaDB collection (name versioned per embedding model)."""
     global _client, _collection
     if _collection is None:
         _client = chromadb.PersistentClient(
@@ -104,7 +126,7 @@ def get_collection():
             settings=Settings(anonymized_telemetry=False)
         )
         _collection = _client.get_or_create_collection(
-            name=COLLECTION_NAME,
+            name=get_active_collection_name(),
             metadata={"hnsw:space": "cosine"}
         )
         # Initialize BM25 after collection is ready
@@ -347,5 +369,7 @@ def get_stats() -> Dict:
     return {
         "total_chunks": collection.count(),
         "total_documents": len(docs),
-        "documents": docs
+        "documents": docs,
+        "embedding_model": EMBEDDING_MODEL,
+        "collection": get_active_collection_name(),
     }

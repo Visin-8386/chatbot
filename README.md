@@ -70,7 +70,7 @@ graph TD;
 
 ## 🛠 Ngăn Xếp Công Nghệ (Tech Stack)
 
-- **AI & NLP**: `PyTorch`, `Transformers`, `Sentence-Transformers`.
+- **AI & NLP**: `PyTorch`, `Transformers`, `Sentence-Transformers` (embedding mặc định `AITeamVN/Vietnamese_Embedding_v2`, fallback `e5-small` qua env).
 - **Vector Database**: `ChromaDB` (Lưu trữ và tìm kiếm vector không gian chiều sâu siêu tốc).
 - **Backend API**: `FastAPI` & `Uvicorn` (Hiệu năng cao, xử lý bất đồng bộ).
 - **Document Parsers**: `PyPDF2`, `python-docx`, `openpyxl`.
@@ -92,7 +92,8 @@ graph TD;
 Hệ thống đã được benchmark trực tiếp trên cấu hình **NVIDIA RTX 3060 (6GB VRAM)** chạy Local hoàn toàn:
 
 - **Tốc độ sinh văn bản (LLM Sailor2-8B-Chat Q4_K_S)**: kỳ vọng **~10-13 tokens/sec** trên RTX 3060 6GB (`n_ctx=4096`, full offload; Qwen2.5-7B trước đây đạt ~14 tok/s do nhẹ hơn).
-- **Tốc độ Embedding (multilingual-e5-small)**: Sau khi warm model, thường ở mức **~20-40 ms/query**.
+- **Tốc độ Embedding (Vietnamese_Embedding_v2)**: model 0.6B/1024 dims, chậm hơn `e5-small` một chút nhưng trúng tiếng Việt hơn hẳn; warm model trước khi đo.
+> ⚠️ **Đổi embedding = đổi collection:** tên collection Chroma được version theo embedding model nên sau khi đổi `EMBEDDING_MODEL` cần **upload lại tài liệu** (index cũ còn nguyên trên đĩa để rollback bằng `VECTOR_COLLECTION=company_documents` + `EMBEDDING_MODEL=intfloat/multilingual-e5-small`).
 - **Độ trễ truy vấn thực tế với `/api/search` (chế độ nhanh `FASTEST_RESPONSE_MODE=1`)**:
   - Cold start (vừa bật server, chưa preload): có thể lên đến **~6s** do tải model.
   - Warm request (model đã sẵn sàng): khoảng **~25-30 ms**.
