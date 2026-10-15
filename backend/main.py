@@ -566,6 +566,14 @@ async def system_stats():
     return get_stats()
 
 
+@app.get("/api/traces", dependencies=[Depends(verify_api_key)])
+async def list_traces(limit: int = 50, offset: int = 0, q: Optional[str] = None):
+    """Đọc traces RAG mới nhất (observability lite từ logs/traces.jsonl)."""
+    from backend.trace_logger import read_traces
+    data = await run_in_threadpool(read_traces, limit, offset, q)
+    return {"limit": limit, "offset": offset, "q": q, **data}
+
+
 # --- Session / Memory Endpoints (2.3) ---
 
 @app.get("/api/sessions", dependencies=[Depends(verify_api_key)])
