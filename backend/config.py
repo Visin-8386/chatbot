@@ -77,6 +77,11 @@ ENABLE_HYDE = os.getenv("ENABLE_HYDE", "0") == "1"                       # 2.1 Q
 CRAG_RELEVANCE_THRESHOLD = float(os.getenv("CRAG_RELEVANCE_THRESHOLD", "30"))  # 2.2 CRAG gate (%)
 ENABLE_PERSISTENT_MEMORY = os.getenv("ENABLE_PERSISTENT_MEMORY", "1") == "1"   # 2.3 SQLite memory
 
+# Hybrid fusion: "weighted" (mặc định SOTA: α-interpolation dense+BM25) hoặc "rrf".
+HYBRID_FUSION = os.getenv("HYBRID_FUSION", "weighted").strip().lower()
+HYBRID_DENSE_WEIGHT = float(os.getenv("HYBRID_DENSE_WEIGHT", "0.7"))  # trọng số dense (0..1)
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))  # hằng số RRF khi HYBRID_FUSION=rrf
+
 # Search
 TOP_K = int(os.getenv("TOP_K", "6"))                 # number of results to return
 ENABLE_CONTEXT_EXPANSION = os.getenv("ENABLE_CONTEXT_EXPANSION", "1") == "1" # Tự động lấy chunk trước/sau
@@ -84,6 +89,14 @@ SIMILARITY_THRESHOLD = 30 # minimum similarity % to include in results
 RETRIEVAL_CANDIDATE_MULTIPLIER = int(os.getenv("RETRIEVAL_CANDIDATE_MULTIPLIER", "4"))
 RERANK_EMBEDDING_WEIGHT = float(os.getenv("RERANK_EMBEDDING_WEIGHT", "0.75"))
 RERANK_KEYWORD_WEIGHT = float(os.getenv("RERANK_KEYWORD_WEIGHT", "0.25"))
+# Reranker (SOTA Vietnamese default; free + offline after first download)
+# AITeamVN/Vietnamese_Reranker: fine-tuned from bge-reranker-v2-m3, 0.6B, Apache-2.0.
+# Rollback via env: RERANKER_MODEL=BAAI/bge-reranker-base (lighter, 278M).
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "AITeamVN/Vietnamese_Reranker")
+# RERANKER_DEVICE=auto | cuda | cpu. "cpu" frees VRAM for the LLM on 6GB cards
+# (rerank of ~12 short pairs is fast enough on CPU).
+_RERANKER_DEVICE_ENV = os.getenv("RERANKER_DEVICE", "auto").strip().lower()
+RERANKER_DEVICE = _RERANKER_DEVICE_ENV if _RERANKER_DEVICE_ENV in ("auto", "cuda", "cpu") else "auto"
 # Truncate chunk text khi rerank: 300 chars (~60-80 tokens) đủ để judge relevance
 RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "300"))
 

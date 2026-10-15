@@ -5,7 +5,7 @@ import chromadb
 import re
 import os
 import pickle
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from chromadb.config import Settings
 from rank_bm25 import BM25Okapi
 from loguru import logger
@@ -221,44 +221,52 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
         scored_docs.sort(key=lambda x: x[0], reverse=True)
         bm25_results_list = scored_docs[:50]
 
-    # 3. Reciprocal Rank Fusion (RRF)
-    # RRF combines rankings from different sources.
-    # Score = sum(1 / (rank + k)) where k=60 is standard.
-    k = 60
-    scores = {} # Key: doc_id, Value: {score, text, metadata, vector_sim}
+    # 3. Fusion (dense + sparse) — weighted interpolation (mặc định SOTA)
+    # hoặc RRF cổ điển qua env HYBRID_FUSION=rrf. Xem backend/hybrid_fusion.py.
+    from backend.hybrid_fusion import fuse as _fuse_candidates
+    from backend.config import HYBRID_FUSION, HYBRID_DENSE_WEIGHT, HYBRID_RRF_K
 
-    # Process Vector Results
+    vector_ranked: List[Tuple[str, float]] = []
+    payloads: Dict[str, Dict] = {}
     if vector_results and vector_results["ids"]:
         for rank, doc_id in enumerate(vector_results["ids"][0]):
             distance = vector_results["distances"][0][rank]
             similarity = max(0, (1 - distance / 2)) * 100
-            
-            if doc_id not in scores:
-                scores[doc_id] = {
-                    "score": 0,
-                    "text": vector_results["documents"][0][rank],
-                    "metadata": vector_results["metadatas"][0][rank],
-                    "similarity": similarity
-                }
-            scores[doc_id]["score"] += 1.0 / (rank + 1 + k)
+            vector_ranked.append((doc_id, similarity))
+            payloads[doc_id] = {
+                "text": vector_results["documents"][0][rank],
+                "metadata": vector_results["metadatas"][0][rank],
+                "similarity": similarity,
+            }
 
-    # Process BM25 Results
-    for rank, (bm25_score, doc_info) in enumerate(bm25_results_list):
+    bm25_ranked: List[Tuple[str, float]] = []
+    for _bm25_score, doc_info in bm25_results_list:
         doc_id = doc_info["id"]
-        if doc_id not in scores:
-            scores[doc_id] = {
-                "score": 0,
+        bm25_ranked.append((doc_id, float(_bm25_score)))
+        if doc_id not in payloads:
+            payloads[doc_id] = {
                 "text": doc_info["text"],
                 "metadata": doc_info["metadata"],
-                "similarity": 0.0 # Will be updated if also in vector results
+                "similarity": 0.0,  # chỉ khớp keyword, không có điểm dense
             }
-        scores[doc_id]["score"] += 1.0 / (rank + 1 + k)
+
+    fused_order = _fuse_candidates(
+        vector_ranked, bm25_ranked,
+        method=HYBRID_FUSION, dense_weight=HYBRID_DENSE_WEIGHT, rrf_k=HYBRID_RRF_K,
+    )
 
     # 4. Final Ranking
-    final_results = list(scores.values())
-    # If a result was only in BM25, similarity is 0. 
-    # We don't filter by SIMILARITY_THRESHOLD here to allow keyword matches to surface.
-    final_results.sort(key=lambda x: x["score"], reverse=True)
+    # Với weighted: fused_score đã ở thang 0-100 và thay thế similarity để
+    # ngưỡng lọc downstream (CRAG/clarification) phản ánh cả 2 nguồn.
+    # Với rrf: giữ similarity dense gốc như hành vi cũ.
+    final_results = []
+    for doc_id, fused_score, dense_sim in fused_order:
+        item = payloads[doc_id]
+        if (HYBRID_FUSION or "weighted").strip().lower() == "rrf":
+            final_results.append({**item, "score": fused_score})
+        else:
+            final_results.append({**item, "score": fused_score, "similarity": round(fused_score, 1)})
+    # Doc chỉ khớp BM25 vẫn được giữ (không lọc ngưỡng ở đây để keyword lọt lên).
 
     # 5. Context Expansion (Sliding Window)
     top_items = final_results[:effective_top_k]

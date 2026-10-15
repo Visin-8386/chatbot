@@ -89,15 +89,20 @@ _reranker = None
 _reranker_lock = threading.Lock()
 
 def get_reranker() -> CrossEncoder:
-    """Load and cache the reranker model (BGE Reranker)."""
+    """Load and cache the reranker model (Vietnamese SOTA default, device-configurable)."""
     global _reranker
     if _reranker is None:
         with _reranker_lock:
             if _reranker is None:
-                model_name = "BAAI/bge-reranker-base"
-                logger.info("Loading Reranker: {}", model_name)
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                _reranker = CrossEncoder(model_name, device=device)  # Cache dir controlled via HF_HOME env var
+                from backend.config import RERANKER_MODEL, RERANKER_DEVICE
+                logger.info("Loading Reranker: {} (device={})", RERANKER_MODEL, RERANKER_DEVICE)
+                if RERANKER_DEVICE == "cuda":
+                    device = "cuda"
+                elif RERANKER_DEVICE == "cpu":
+                    device = "cpu"
+                else:
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                _reranker = CrossEncoder(RERANKER_MODEL, device=device)  # Cache dir controlled via HF_HOME env var
                 logger.info("Reranker ready on {}.", device.upper())
     return _reranker
 
