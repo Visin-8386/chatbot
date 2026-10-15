@@ -1,6 +1,7 @@
 """
-Generator Service - Local LLM (Qwen2.5-1.5B-Instruct) with float16 on GPU.
-No external API needed. Runs entirely on your RTX 3060.
+Generator Service - Local LLM (Sailor2-8B-Chat Q4_K_S safe default) via llama-cpp GGUF.
+No external API needed. Runs entirely on your RTX 3060 (6GB VRAM budget).
+Fallbacks via env: Qwen2.5-7B Q4_K_M / Sailor2 IQ4_XS — see backend/config.py.
 """
 import os
 import torch
@@ -22,6 +23,9 @@ from backend.config import (
     GENERATION_MAX_TIME_SEC,
     LLM_MODEL,
     LLM_GGUF_FILENAME,
+    LLM_CHAT_FORMAT,
+    LLM_N_CTX,
+    LLM_N_GPU_LAYERS,
     MODELS_DIR,
     ENABLE_HYDE,
     CRAG_RELEVANCE_THRESHOLD,
@@ -53,29 +57,30 @@ def get_tokenizer():
 
 
 def get_model() -> Llama:
-    """Load and cache the GGUF model on first use."""
+    """Load and cache the GGUF model on first use (sequential preload — VRAM safe)."""
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
                 logger.info("Downloading/Loading GGUF Model: {} ({})", LLM_MODEL, LLM_GGUF_FILENAME)
-                
+
                 # Download model file if not exists
                 model_path = hf_hub_download(
                     repo_id=LLM_MODEL,
                     filename=LLM_GGUF_FILENAME,
                     cache_dir=MODELS_DIR
                 )
-                
-                logger.info("Initializing Llama-cpp (GGUF) on GPU...")
+
+                logger.info("Initializing Llama-cpp (GGUF) on GPU... n_ctx={} chat_format={}", LLM_N_CTX, LLM_CHAT_FORMAT)
                 _model = Llama(
                     model_path=model_path,
-                    n_ctx=4096,           # Context window
-                    n_gpu_layers=-1,      # -1 means all layers to GPU
+                    n_ctx=LLM_N_CTX,          # Keep 4096 on 6GB VRAM
+                    n_gpu_layers=LLM_N_GPU_LAYERS,  # -1 = full offload; lower if OOM
                     n_threads=os.cpu_count() or 4,
+                    chat_format=LLM_CHAT_FORMAT or None,  # chatml for Sailor2/Qwen2
                     verbose=False
                 )
-                
+
                 logger.info("Llama-cpp (GGUF) ready with GPU acceleration.")
     return _model
 
@@ -135,16 +140,15 @@ def _build_source_citation_text(sources_info: List[Dict]) -> str:
 
 
 def _run_chat(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS, strict: bool = False) -> str:
-    """Run GGUF chat generation (synchronous)."""
+    """Run GGUF chat generation (synchronous). ChatML stop tokens prevent runaway."""
     model = get_model()
-    
-    # Llama-cpp handles chat templates internally if specified, 
-    # but Qwen 2.5 works well with its standard format.
+
     response = model.create_chat_completion(
         messages=messages,
         max_tokens=max_new_tokens,
         temperature=0.1,
         repeat_penalty=1.1,
+        stop=["<|im_start|>", "<|im_end|>"],
     )
     return response["choices"][0]["message"]["content"].strip()
 
@@ -152,12 +156,13 @@ def _run_chat(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOK
 def _run_chat_stream(messages: List[Dict], max_new_tokens: int = GENERATION_MAX_NEW_TOKENS) -> Generator[str, None, None]:
     """Run GGUF chat generation with streaming tokens."""
     model = get_model()
-    
+
     stream = model.create_chat_completion(
         messages=messages,
         max_tokens=max_new_tokens,
         temperature=0.1,
         repeat_penalty=1.1,
+        stop=["<|im_start|>", "<|im_end|>"],
         stream=True
     )
 
@@ -434,7 +439,7 @@ def _load_skills() -> str:
 
 def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = False, history: List[Dict] | None = None) -> Dict:
     """
-    Generate answer using local Qwen 2.5 model based on retrieved context chunks.
+    Generate answer using local Sailor2-8B-Chat (Qwen2-based) model based on retrieved context chunks.
     Always appends source citations to the answer.
     
     Returns:
@@ -454,7 +459,8 @@ def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = 
 
     # Simplified prompt — small models work better with direct instructions
     system_msg = (
-        "Bạn là TRỢ LÝ TRA CỨU TÀI LIỆU DOANH NGHIỆP chuyên nghiệp và nghiêm ngặt. "
+        "Bạn là TRỢ LÝ TRA CỨU TÀI LIỆU DOANH NGHIỆP chuyên nghiệp và nghiêm ngặt (DocSearch nội bộ). "
+        "Bạn KHÔNG phải Sailor2/Sea AI Lab/Qwen — không tự xưng tên model gốc, chỉ xưng trợ lý DocSearch. "
         "NHIỆM VỤ: Chỉ cung cấp thông tin CHÍNH XÁC có trong TÀI LIỆU CUNG CẤP. "
         "PHẠM VI: Bạn KHÔNG ĐƯỢC PHÉP sử dụng kiến thức bên ngoài, không giải quyết các vấn đề ngoài lề như lập trình, nấu ăn, hay đời sống. "
         "CÔNG THỨC TRẢ LỜI: Nếu thông tin có trong tài liệu -> Trả lời kèm trích dẫn [Tên_file - Trang]. "
@@ -503,7 +509,7 @@ def generate_answer(query: str, search_results: List[Dict], strict_mode: bool = 
 
 def generate_answer_stream(query: str, search_results: List[Dict], strict_mode: bool = False, history: List[Dict] | None = None) -> Generator[str, None, None]:
     """
-    Generate streaming answer using local Qwen 2.5 model.
+    Generate streaming answer using local Sailor2-8B-Chat model.
     Yields JSON chunks for SSE.
     """
     if not search_results:
@@ -517,7 +523,8 @@ def generate_answer_stream(query: str, search_results: List[Dict], strict_mode: 
     history_text = _build_history_text(normalized_history)
 
     system_msg = (
-        "Bạn là TRỢ LÝ TRA CỨU TÀI LIỆU DOANH NGHIỆP. Chỉ trả lời dựa trên tài liệu cung cấp. "
+        "Bạn là TRỢ LÝ TRA CỨU TÀI LIỆU DOANH NGHIỆP (DocSearch nội bộ). "
+        "Bạn KHÔNG phải Sailor2/Sea AI Lab/Qwen — không tự xưng tên model gốc. "
         "Nếu ngoài phạm vi, hãy từ chối trả lời một cách lịch sự nhưng nghiêm ngặt."
     )
     # Nạp thêm kỹ năng chuyên gia

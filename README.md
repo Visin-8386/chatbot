@@ -6,7 +6,7 @@
 
   <p>
     <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi" alt="FastAPI"></a>
-    <a href="https://huggingface.co/Qwen"><img src="https://img.shields.io/badge/Qwen_2.5-1.5B-7C5CFC?style=for-the-badge&logo=huggingface&logoColor=white" alt="Qwen"></a>
+    <a href="https://huggingface.co/sail/Sailor2-8B-Chat"><img src="https://img.shields.io/badge/Sailor2--8B--Chat-Q4_K_S-7C5CFC?style=for-the-badge&logo=huggingface&logoColor=white" alt="Sailor2"></a>
     <a href="https://www.trychroma.com/"><img src="https://img.shields.io/badge/ChromaDB-Vector_Store-FF6C37?style=for-the-badge" alt="ChromaDB"></a>
     <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch"></a>
   </p>
@@ -28,8 +28,8 @@ DocSearch không chỉ là một công cụ tìm kiếm đơn thuần, mà là *
       <p>Hoạt động hoàn toàn nội bộ trên máy chủ/máy tính cá nhân. Mọi dữ liệu (từ PDF, Word đến câu hỏi của bạn) <b>không bao giờ</b> rời khỏi máy. Đảm bảo an toàn 100% cho bí mật kinh doanh.</p>
     </td>
     <td width="50%">
-      <h3>🧠 Trí Tuệ SOTA (Qwen 2.5)</h3>
-      <p>Sử dụng siêu mô hình Qwen 2.5 (1.5B) tinh chỉnh đặc biệt, cho khả năng sinh ngữ cảnh và suy luận tiếng Việt vượt trội, nhanh gọn và tối ưu hoá cho phần cứng cá nhân.</p>
+      <h3>🧠 Trí Tuệ SOTA (Sailor2-8B)</h3>
+      <p>Sử dụng mô hình Sailor2-8B-Chat (bản GGUF Q4_K_S ~4.99GB, tinh chỉnh cho Đông Nam Á/Việt Nam từ nền Qwen2.5), cho khả năng sinh ngữ cảnh và suy luận tiếng Việt vượt trội, vừa vặn VRAM 6GB. Fallback: Qwen2.5-7B Q4_K_M / Sailor2 IQ4_XS qua biến môi trường `LLM_MODEL`.</p>
     </td>
   </tr>
   <tr>
@@ -60,7 +60,7 @@ graph TD;
         E["Người dùng đặt câu hỏi"] --> Q{"Clarification Gate & Query Rewrite"};
         Q -->|"Làm rõ & tối ưu truy vấn"| F{"Embedding Query"};
         F -->|"Tìm kiếm Vector"| D;
-        D -->|"Top K Ngữ cảnh (K=5)"| G("Local LLM (Qwen 2.5)");
+        D -->|"Top K Ngữ cảnh (K=5)"| G("Local LLM (Sailor2-8B)");
         G -->|"Bản nháp trả lời"| S{"Self-Check (Kiểm tra ảo giác)"};
         S -->|"Passed"| H["Giao diện DocSearch (Kèm Trích dẫn)"];
         S -->|"Failed"| R["Thử lại (Strict Retry) / Fallback"];
@@ -91,7 +91,7 @@ graph TD;
 
 Hệ thống đã được benchmark trực tiếp trên cấu hình **NVIDIA RTX 3060 (6GB VRAM)** chạy Local hoàn toàn:
 
-- **Tốc độ sinh văn bản (LLM Qwen 2.5 - 1.5B)**: Đạt mức **~14.00 tokens/sec** ở định dạng `float16`.
+- **Tốc độ sinh văn bản (LLM Sailor2-8B-Chat Q4_K_S)**: kỳ vọng **~10-13 tokens/sec** trên RTX 3060 6GB (`n_ctx=4096`, full offload; Qwen2.5-7B trước đây đạt ~14 tok/s do nhẹ hơn).
 - **Tốc độ Embedding (multilingual-e5-small)**: Sau khi warm model, thường ở mức **~20-40 ms/query**.
 - **Độ trễ truy vấn thực tế với `/api/search` (chế độ nhanh `FASTEST_RESPONSE_MODE=1`)**:
   - Cold start (vừa bật server, chưa preload): có thể lên đến **~6s** do tải model.

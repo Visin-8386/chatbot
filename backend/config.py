@@ -33,8 +33,14 @@ def _parse_csv_env(name: str, default: List[str]) -> List[str]:
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
 # LLM Model (GGUF Version for Speed & Efficiency)
-LLM_MODEL = os.getenv("LLM_MODEL", "bartowski/Qwen2.5-7B-Instruct-GGUF")
-LLM_GGUF_FILENAME = os.getenv("LLM_GGUF_FILENAME", "Qwen2.5-7B-Instruct-Q4_K_M.gguf")
+# SOTA safe default: Sailor2-8B-Chat Q4_K_S (~4.99GB) — SEA/Vietnamese-tuned,
+# fits RTX 3060 6GB with n_ctx=4096. Override via env for rollback or fallback:
+#   Qwen2.5-7B Q4_K_M (lighter) / Sailor2 IQ4_XS (lightest, ~4.71GB).
+LLM_MODEL = os.getenv("LLM_MODEL", "bartowski/Sailor2-8B-Chat-GGUF")
+LLM_GGUF_FILENAME = os.getenv("LLM_GGUF_FILENAME", "Sailor2-8B-Chat-Q4_K_S.gguf")
+LLM_CHAT_FORMAT = os.getenv("LLM_CHAT_FORMAT", "chatml")  # Sailor2/Qwen2 use ChatML
+LLM_N_CTX = int(os.getenv("LLM_N_CTX", "4096"))  # Keep 4096 on 6GB VRAM; do not raise without measuring
+LLM_N_GPU_LAYERS = int(os.getenv("LLM_N_GPU_LAYERS", "-1"))  # -1 = full offload; use 0 or fewer layers if OOM
 LLM_LOAD_IN_4BIT = True # GGUF is already quantized
 
 # Chunking
