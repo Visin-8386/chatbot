@@ -19,6 +19,8 @@ from backend.config import (
     MAX_CHUNKS_PER_SECTION,
     PDF_MARGIN_REPEAT_RATIO,
     SUPPORTED_EXTENSIONS,
+    DOC_PARSER,
+    DOCLING_ARTIFACTS_PATH,
 )
 from backend.embedding_service import get_model as get_embed_model, get_cosine_similarities
 from loguru import logger
@@ -142,7 +144,107 @@ def _remove_repeated_margin_lines(lines: List[str], repeated_signatures: set) ->
 
 
 def extract_text_from_pdf(file_path: str) -> List[Dict]:
-    """Extract text from PDF file, split page content into semantic sections."""
+    """Extract text from PDF file, split page content into semantic sections.
+
+    SOTA path: Docling (CPU-only, layout + table structure + OCR for scans)
+    when DOC_PARSER allows it and the package is installed. Otherwise falls
+    back to the PyPDF2 path below. Never raises for missing/failed Docling —
+    always degrades gracefully to PyPDF2.
+    """
+    if DOC_PARSER in ("auto", "docling"):
+        docling_pages = _extract_pdf_with_docling(file_path)
+        if docling_pages:
+            return docling_pages
+        if DOC_PARSER == "docling":
+            logger.warning("Docling requested but failed/unavailable for {}; using PyPDF2 fallback.", file_path)
+    return _extract_text_from_pdf_pypdf(file_path)
+
+
+def _extract_pdf_with_docling(file_path: str) -> List[Dict]:
+    """Advanced PDF parse via Docling (optional dependency, CPU-only).
+
+    Returns [] when Docling is not installed or parsing fails, so the caller
+    can fall back to PyPDF2. Table structure is preserved as Markdown pipes
+    (reused downstream by the table-aware chunker).
+    """
+    try:
+        from docling.document_converter import DocumentConverter
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.datamodel.base_models import InputFormat
+        from docling.document_converter import PdfFormatOption
+    except Exception as e:
+        logger.debug("Docling not installed, skipping advanced PDF parse: {}", e)
+        return []
+
+    try:
+        import os as _os
+        _os.makedirs(DOCLING_ARTIFACTS_PATH, exist_ok=True)
+        pipeline_options = PdfPipelineOptions(
+            do_picture_classification=False,  # save RAM: skip image classification
+            do_code_enrichment=False,         # save time: skip code understanding
+            do_formula_enrichment=False,      # save time: skip formula LaTeX
+        )
+        converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+        )
+        result = converter.convert(file_path)
+        doc = result.document
+
+        # Group text items by page to preserve page metadata for citations.
+        page_texts: Dict[int, List[str]] = {}
+        for item, _level in doc.iterate_items():
+            text = getattr(item, "text", "") or ""
+            text = text.strip()
+            if not text:
+                continue
+            page_no = 1
+            try:
+                prov = getattr(item, "prov", None) or []
+                if prov and getattr(prov[0], "page_no", None):
+                    page_no = int(prov[0].page_no)
+            except Exception:
+                pass
+            # Tables come through as structured items: render as Markdown rows.
+            if getattr(item, "label", None) and "table" in str(getattr(item, "label", "")).lower():
+                try:
+                    table_md = item.export_to_markdown(doc=doc)
+                    if table_md and table_md.strip():
+                        text = table_md.strip()
+                except Exception:
+                    pass
+            page_texts.setdefault(page_no, []).append(text)
+
+        if not page_texts:
+            # Last resort: whole-document Markdown export (loses page numbers).
+            md = doc.export_to_markdown().strip()
+            if not md:
+                return []
+            return [{"text": md, "metadata": {}}]
+
+        pages = []
+        for page_no in sorted(page_texts):
+            cleaned_text = "\n".join(page_texts[page_no]).strip()
+            if not cleaned_text:
+                continue
+            sections = _split_into_blocks(cleaned_text) or [cleaned_text]
+            for section_index, section_text in enumerate(sections):
+                pages.append({
+                    "text": section_text.strip(),
+                    "metadata": {
+                        "page": page_no,
+                        "page_block_index": section_index,
+                        "parser": "docling",
+                    }
+                })
+        logger.info("Docling parsed {} ({} pages -> {} sections).", file_path, len(page_texts), len(pages))
+        return pages
+    except Exception as e:
+        logger.warning("Docling parse failed for {}: {}. Falling back to PyPDF2.", file_path, e)
+        return []
+
+
+def _extract_text_from_pdf_pypdf(file_path: str) -> List[Dict]:
+    """Legacy PyPDF2 extraction (fallback / DOC_PARSER=pypdf)."""
     reader = PdfReader(file_path)
     raw_pages = []
     for i, page in enumerate(reader.pages):

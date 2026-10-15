@@ -73,7 +73,7 @@ graph TD;
 - **AI & NLP**: `PyTorch`, `Transformers`, `Sentence-Transformers` (embedding mặc định `AITeamVN/Vietnamese_Embedding_v2`, fallback `e5-small` qua env).
 - **Vector Database**: `ChromaDB` (Lưu trữ và tìm kiếm vector không gian chiều sâu siêu tốc).
 - **Backend API**: `FastAPI` & `Uvicorn` (Hiệu năng cao, xử lý bất đồng bộ).
-- **Document Parsers**: `PyPDF2`, `python-docx`, `openpyxl`.
+- **Document Parsers**: `PyPDF2` (mặc định) + `Docling` optional (CPU-only, layout + bảng + OCR scan; bật bằng cách `pip install docling` và `DOC_PARSER=auto`), `python-docx`, `openpyxl`.
 - **Frontend**: `Vanilla JS`, HTML5, CSS3 Variables (Không phụ thuộc framework nặng nề, tốc độ tải tức thì).
 
 ## 🖥 Yêu Cầu Hệ Thống

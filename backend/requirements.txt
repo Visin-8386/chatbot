@@ -10,6 +10,10 @@ chromadb==0.5.5
 PyPDF2==3.0.1
 python-docx==1.1.2
 openpyxl==3.1.5
+# Optional SOTA PDF parser (CPU-only, MIT, offline after first model download):
+# uncomment to enable Docling (layout + tables + OCR). Downloads ~1-2GB models
+# into data/models/docling on first use. RAM: ~2GB per file recommended.
+# docling>=2.20.0
 
 python-dotenv==1.0.1
 transformers>=4.48.0,<5.0.0

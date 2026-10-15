@@ -99,6 +99,12 @@ REWRITE_MAX_NEW_TOKENS = int(os.getenv("REWRITE_MAX_NEW_TOKENS", "24"))
 GENERATION_MAX_TIME_SEC = float(os.getenv("GENERATION_MAX_TIME_SEC", "30"))
 FASTEST_RESPONSE_MODE = os.getenv("FASTEST_RESPONSE_MODE", "0") == "1"
 
+# Document parsing (SOTA: Docling CPU when installed, PyPDF2 fallback otherwise)
+# DOC_PARSER=auto | pypdf | docling. "auto" uses Docling only if importable.
+DOC_PARSER = os.getenv("DOC_PARSER", "auto").strip().lower()
+# Docling runs CPU-only by default (no VRAM taken from the LLM).
+DOCLING_ARTIFACTS_PATH = os.getenv("DOCLING_ARTIFACTS_PATH", os.path.join(MODELS_DIR, "docling")).strip()
+
 # Upload limits
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
