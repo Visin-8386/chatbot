@@ -200,7 +200,9 @@ def rewrite_query(query: str, history: List[Dict] | None = None) -> str:
         "Bạn là bộ tối ưu truy vấn tìm kiếm tài liệu doanh nghiệp. "
         "Nhiệm vụ: Dựa vào lịch sử hội thoại (nếu có) và câu hỏi mới nhất, hãy viết lại thành MỘT CÂU TRUY VẤN TÌM KIẾM ĐẦY ĐỦ Ý VÀ NGỮ CẢNH. "
         "Ví dụ: Lịch sử 'nghỉ phép 12 ngày/năm', câu mới 'còn gì nữa k' -> Viết lại: 'Các quy định bổ sung về chế độ và thủ tục xin nghỉ phép năm'. "
-        "Trả về đúng 1 câu truy vấn duy nhất, không thêm giải thích hay dấu ngoặc."
+        "Nghiêm cấm định dạng Markdown (không **in đậm**, không tiêu đề, không bullet), "
+        "không tiền tố giải thích ('Truy vấn tìm kiếm:'), không bọc trong ngoặc kép. "
+        "Trả về đúng 1 câu truy vấn duy nhất."
     )
     user_msg = f"{history_text}Câu hỏi mới nhất: {clean_query}"
     try:
@@ -213,11 +215,39 @@ def rewrite_query(query: str, history: List[Dict] | None = None) -> str:
             max_new_tokens=max_tokens,
             strict=True
         )
-        rewritten = rewritten.splitlines()[0].strip() if rewritten else clean_query
-        return rewritten or clean_query
+        cleaned = _clean_rewritten_query(rewritten) if rewritten else ""
+        return cleaned or clean_query
     except Exception as e:
         logger.error("Query rewrite error: {}", e)
         return clean_query
+
+
+def _clean_rewritten_query(text: str) -> str:
+    """Lột bỏ Markdown/tiền tố model hay thêm vào câu rewrite.
+
+    Sailor2/Qwen hay trả '**Truy vấn tìm kiếm:** "..."' hoặc '"câu..."'.
+    Chỉ giữ nội dung truy vấn thuần để retrieval không bị nhiễu.
+    """
+    line = (text or "").splitlines()[0].strip() if (text or "").strip() else ""
+    if not line:
+        return ""
+    # Bỏ dấu ** còn sót
+    line = line.replace("**", "").strip()
+    # Bỏ tiền tố nhãn kiểu "Truy vấn tìm kiếm: <câu>" (model hay thêm)
+    label_match = re.match(
+        r"^(truy vấn|câu truy vấn|tìm kiếm|câu hỏi viết lại|kết quả)[^:\n]{0,20}:\s*(.+)$",
+        line,
+        re.IGNORECASE,
+    )
+    if label_match:
+        line = label_match.group(2).strip()
+    # Bỏ ngoặc kép bọc ngoài
+    if len(line) >= 2 and line[0] == line[-1] and line[0] in ("\"", "'", "“", "”"):
+        line = line[1:-1].strip()
+    # Bỏ mũi tên giải thích kiểu "cũ -> mới", chỉ lấy vế sau
+    if "->" in line:
+        line = line.split("->")[-1].strip().strip("\"'“” ")
+    return line
 
 
 def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict]:

@@ -27,6 +27,7 @@ wheels/
 
 # Project specific
 data/chroma_db/
+data/*.db
 uploads/
 test_data/
 logs/
