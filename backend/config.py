@@ -97,6 +97,11 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "AITeamVN/Vietnamese_Reranker")
 # (rerank of ~12 short pairs is fast enough on CPU).
 _RERANKER_DEVICE_ENV = os.getenv("RERANKER_DEVICE", "auto").strip().lower()
 RERANKER_DEVICE = _RERANKER_DEVICE_ENV if _RERANKER_DEVICE_ENV in ("auto", "cuda", "cpu") else "auto"
+# EMBEDDING_DEVICE=cpu | cuda | auto. Default "cpu": Vietnamese embedding 0.6B
+# (~2.4GB fp32) would otherwise crowd the 6GB VRAM next to the 5GB LLM.
+# CPU inference (~100-300ms/query) is fast enough and keeps GPU for generation.
+_EMBEDDING_DEVICE_ENV = os.getenv("EMBEDDING_DEVICE", "cpu").strip().lower()
+EMBEDDING_DEVICE = _EMBEDDING_DEVICE_ENV if _EMBEDDING_DEVICE_ENV in ("auto", "cuda", "cpu") else "cpu"
 # Truncate chunk text khi rerank: 300 chars (~60-80 tokens) đủ để judge relevance
 RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "300"))
 

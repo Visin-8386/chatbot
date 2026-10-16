@@ -4,18 +4,31 @@ bge-m3-based, 1024 dims) with e5-small fallback. Free + offline after first down
 """
 from typing import List
 from sentence_transformers import SentenceTransformer
-from backend.config import EMBEDDING_MODEL, EMBEDDING_USE_E5_PREFIX, MODELS_DIR
+from backend.config import EMBEDDING_MODEL, EMBEDDING_USE_E5_PREFIX, EMBEDDING_DEVICE, MODELS_DIR
 
 # Global model instance (loaded once)
 _model = None
 
 
+def _resolve_device() -> str:
+    if EMBEDDING_DEVICE == "cuda":
+        return "cuda"
+    if EMBEDDING_DEVICE == "cpu":
+        return "cpu"
+    try:
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
 def get_model() -> SentenceTransformer:
-    """Load and cache the embedding model."""
+    """Load and cache the embedding model (device per EMBEDDING_DEVICE)."""
     global _model
     if _model is None:
-        print(f"Loading embedding model: {EMBEDDING_MODEL}...")
-        _model = SentenceTransformer(EMBEDDING_MODEL, cache_folder=MODELS_DIR)
+        device = _resolve_device()
+        print(f"Loading embedding model: {EMBEDDING_MODEL} (device={device})...")
+        _model = SentenceTransformer(EMBEDDING_MODEL, cache_folder=MODELS_DIR, device=device)
         print("Model loaded successfully!")
     return _model
 
