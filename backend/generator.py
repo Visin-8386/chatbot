@@ -234,10 +234,18 @@ def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict
 
     scores = reranker.predict(pairs, batch_size=len(pairs), show_progress_bar=False)
 
+    # Chuẩn hóa min-max điểm rerank về 0-100 trong tập ứng viên: CrossEncoder
+    # các bản khác nhau trả logit thô hoặc xác suất, và calibration tuyệt đối
+    # kém (paraphrase đúng chỉ ~0.06 trong khi exact-match ~0.99) — nhưng thứ tự
+    # luôn đúng, nên min-max giữ nguyên ordering mà vẫn phân biệt được.
+    raw = [float(s) for s in scores]
+    lo, hi = min(raw), max(raw)
     for i, res in enumerate(results):
-        raw_score = float(scores[i])
-        res["rerank_score"] = raw_score
-        rerank_sim = float(torch.sigmoid(torch.tensor(raw_score)).item()) * 100
+        res["rerank_score"] = raw[i]
+        if hi > lo:
+            rerank_sim = (raw[i] - lo) / (hi - lo) * 100.0
+        else:
+            rerank_sim = max(0.0, min(1.0, raw[i])) * 100.0
         orig_sim = float(res.get("similarity", 50.0))
         # Fuse scores: 50% Cross-Encoder + 50% Hybrid Vector+BM25 similarity
         res["similarity"] = round(0.5 * rerank_sim + 0.5 * orig_sim, 1)
