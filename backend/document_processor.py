@@ -764,11 +764,73 @@ def _build_chunks_from_units(units: List[str], chunk_size: int, overlap: int) ->
     return chunks
 
 
+_LAW_ARTICLE_MARK_RE = re.compile(r"(?m)^Điều\s+\d+\.")
+_LAW_ARTICLE_SPLIT_RE = re.compile(r"(?m)(?=^Điều\s+\d+\.)")
+_LAW_HEADER_MAX_CHARS = 160
+
+
+def _is_legal_text(text: str, min_articles: int = 5) -> bool:
+    """Văn bản luật: nhiều dòng bắt đầu bằng 'Điều N.'."""
+    return len(_LAW_ARTICLE_MARK_RE.findall(text)) >= min_articles
+
+
+def _shorten_legal_header(header: str) -> str:
+    one_line = " ".join(header.split())
+    if len(one_line) <= _LAW_HEADER_MAX_CHARS:
+        return one_line
+    return one_line[:_LAW_HEADER_MAX_CHARS].rstrip() + "..."
+
+
+def _chunk_legal_text(text: str, chunk_size: int, overlap: int) -> List[str]:
+    """Chunk văn bản luật theo Điều: giữ header 'Điều N. ...' trong mọi mảnh.
+
+    Chunk generic cắt giữa điều làm mất chủ thể (vd. danh sách 'báo trước
+    45/30/03 ngày' của Điều 35 và Điều 36 BLLĐ gần như trùng nhau, nếu mảnh
+    không còn header thì reranker/LLM không phân biệt được điều nào của ai).
+    """
+    parts = _LAW_ARTICLE_SPLIT_RE.split(text)
+    if len(parts) <= 1:
+        return []
+
+    chunks: List[str] = []
+    preamble = parts[0].strip()
+    if preamble:
+        chunks.extend(_build_chunks_from_units(_split_into_blocks(preamble), chunk_size, overlap))
+
+    for article in parts[1:]:
+        article = article.strip()
+        if not article:
+            continue
+        first_line, _, rest = article.partition("\n")
+        header = _shorten_legal_header(first_line)
+        if len(article) <= chunk_size:
+            chunks.append(article)
+            continue
+
+        body = rest.strip()
+        body_budget = max(240, chunk_size - len(header) - 24)
+        body_blocks = _split_into_blocks(body) if body else []
+        body_chunks = _build_chunks_from_units(body_blocks, body_budget, overlap) if body_blocks else []
+        if not body_chunks:
+            chunks.extend(_split_long_unit(article, chunk_size))
+            continue
+        for i, piece in enumerate(body_chunks):
+            prefix = header if i == 0 else f"{header} (tiếp theo)"
+            chunks.append(f"{prefix}\n{piece}")
+    return chunks
+
+
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
     """
     Split text into semantically coherent overlapping chunks.
     Combines structural block splitting with semantic grouping.
     """
+    # 0. Văn bản luật (nhiều "Điều N."): chunk theo điều, giữ header từng mảnh
+    if _is_legal_text(text):
+        legal_chunks = _chunk_legal_text(text, chunk_size, overlap)
+        if legal_chunks:
+            return _post_process_chunks(legal_chunks, chunk_size, MIN_CHUNK_CHARS, ENABLE_CHUNK_DEDUP)
+
     # 1. Get structural blocks (paragraphs, tables, lists)
     blocks = _split_into_blocks(text)
     if not blocks:
