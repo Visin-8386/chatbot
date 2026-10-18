@@ -57,7 +57,7 @@ _FOLLOWUP_RE = re.compile(
         # Tiếp nối câu trước
         ti[eế]p\s+theo | sau\s+đ[oó] | c[oò]n\s+g[ìi]\s+n[uữ]a | v[aà]\s+c[oò]n |
         # Hỏi ngắn mơ hồ (cần history mới hiểu)
-        n[oó]\s+l[aà]\s+g[ìi] | c[aá]i\s+đ[oó] | đi[eề]u\s+đ[oó] | ph[aầ]n\s+đ[oó] |
+        n[oó]\s+l[aà]\s+(?:c[aá]i\s+|v[aậ]y\s+|th[eế]\s+)?g[ìi] | c[aá]i\s+đ[oó] | đi[eề]u\s+đ[oó] | ph[aầ]n\s+đ[oó] |
         # === BỔ SUNG: Các câu phản hồi "chưa đủ / muốn thêm" ===
         ch[uư]a\s+(đ[uủ]|đ[aầ]y\s+đ[uủ]|r[oõ]) |       # chưa đủ, chưa đầy đủ, chưa rõ
         h[ìi]nh\s+nh[uư]\s+thi[eế]u | h[ìi]nh\s+nh[uư]\s+ch[uư]a |  # hình như thiếu, hình như chưa

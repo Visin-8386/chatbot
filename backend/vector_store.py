@@ -2,6 +2,7 @@
 Vector Store - ChromaDB wrapper for document storage and retrieval.
 """
 import chromadb
+import hashlib
 import re
 import os
 import pickle
@@ -14,7 +15,6 @@ from backend.config import (
     CHROMA_DIR,
     TOP_K,
     SIMILARITY_THRESHOLD,
-    RETRIEVAL_CANDIDATE_MULTIPLIER,
     ENABLE_CONTEXT_EXPANSION,
     EMBEDDING_MODEL,
     VECTOR_COLLECTION,
@@ -188,6 +188,27 @@ def add_documents(chunks: List[Dict], doc_id: str) -> int:
     return len(chunks)
 
 
+def _dedupe_by_text(items: List[Dict]) -> List[Dict]:
+    """Drop các chunk có nội dung (đã normalize) trùng nhau, giữ bản hạng cao nhất.
+
+    Corpus luật/doanh nghiệp thật thường chứa đoạn điều khoản mẫu lặp y hệt
+    trong hàng chục văn bản; không dedupe thì chúng chiếm hết slot top-K.
+    """
+    deduped: List[Dict] = []
+    seen = set()
+    for item in items:
+        norm = " ".join((item.get("text") or "").split()).lower()
+        key = hashlib.sha1(norm.encode("utf-8")).hexdigest()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    dropped = len(items) - len(deduped)
+    if dropped:
+        logger.info("Boilerplate dedupe dropped {} duplicate chunks.", dropped)
+    return deduped
+
+
 def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     """
     Search for relevant document chunks using Hybrid Search (Vector + BM25).
@@ -200,10 +221,13 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
         return []
 
     # 1. Vector Search (Dense)
+    # Pool 100 (thay vì 50): HNSW recall ở corpus 69k chunk thấp hơn với k nhỏ —
+    # các chunk đúng có thể nằm ngoài top-50 khi hàng chục bản boilerplate
+    # điểm cao chen chúc. Dedupe phía sau sẽ dọn các bản trùng.
     query_embedding = embed_query(query)
     vector_results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=min(collection.count(), 50), # Get candidates for fusion
+        n_results=min(collection.count(), 100), # Get candidates for fusion
         include=["documents", "metadatas", "distances"]
     )
 
@@ -219,7 +243,7 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
             if score > 0:
                 scored_docs.append((score, _bm25_docs[i]))
         scored_docs.sort(key=lambda x: x[0], reverse=True)
-        bm25_results_list = scored_docs[:50]
+        bm25_results_list = scored_docs[:100]
 
     # 3. Fusion (dense + sparse) — weighted interpolation (mặc định SOTA)
     # hoặc RRF cổ điển qua env HYBRID_FUSION=rrf. Xem backend/hybrid_fusion.py.
@@ -267,6 +291,11 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
         else:
             final_results.append({**item, "score": fused_score, "similarity": round(fused_score, 1)})
     # Doc chỉ khớp BM25 vẫn được giữ (không lọc ngưỡng ở đây để keyword lọt lên).
+
+    # 4b. Boilerplate dedupe: nhiều văn bản luật chứa các đoạn điều khoản mẫu
+    # giống hệt nhau (vd. điều về dân số xuất hiện trong ~100 luật). Nếu không
+    # lọc, các bản sao chiếm hết slot ngữ cảnh và đẩy chunk trả lời đúng xuống.
+    final_results = _dedupe_by_text(final_results)
 
     # 5. Context Expansion (Sliding Window)
     top_items = final_results[:effective_top_k]

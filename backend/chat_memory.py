@@ -24,17 +24,26 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 # ── Cached connection (thread-safe) ──────────────────────────────────────────
 # SQLite allows sharing a single connection across threads when
 # check_same_thread=False; writes are serialised by a lock.
+# _conn_path tracks the DB the cached connection was opened against so that
+# patching DB_PATH (tests/ops) re-opens instead of silently writing to the old DB.
 _conn: Optional[sqlite3.Connection] = None
+_conn_path: Optional[str] = None
 _conn_lock = threading.Lock()
 
 
 def _get_conn() -> sqlite3.Connection:
     """Return the shared SQLite connection, creating it on first call."""
-    global _conn
-    if _conn is None:
+    global _conn, _conn_path
+    if _conn is None or _conn_path != DB_PATH:
         with _conn_lock:
-            if _conn is None:
+            if _conn is None or _conn_path != DB_PATH:
+                if _conn is not None:
+                    try:
+                        _conn.close()
+                    except Exception:
+                        pass
                 _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+                _conn_path = DB_PATH
                 _conn.row_factory = sqlite3.Row
                 # WAL mode: allows concurrent reads while writing
                 _conn.execute("PRAGMA journal_mode=WAL")

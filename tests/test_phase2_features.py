@@ -34,6 +34,9 @@ from backend.generator import hyde_expand_query, crag_check_relevance
 def fresh_db():
     """Khởi tạo DB mới trước mỗi test."""
     import sqlite3
+    # Các module test khác cũng patch _cm.DB_PATH lúc import (pytest collect
+    # tất cả trước khi chạy) — re-assert để không init vào DB của module khác.
+    _cm.DB_PATH = _tmp_db.name
     # Xóa sạch tables nếu tồn tại
     conn = sqlite3.connect(_tmp_db.name)
     conn.execute("DROP TABLE IF EXISTS chat_turns")

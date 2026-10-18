@@ -19,10 +19,21 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Nạp .env như main.py để eval chạy đúng cấu hình production
+# (RERANKER_DEVICE, EMBEDDING_DEVICE, ...) — không override env shell.
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
+
 from loguru import logger
 from backend.vector_store import search
 from backend.generator import generate_answer, get_model, rerank_results
-from backend.config import ENABLE_CONTEXT_EXPANSION
+from backend.config import ENABLE_CONTEXT_EXPANSION, RETRIEVAL_CANDIDATE_MULTIPLIER
+
+# Cho phép chạy trên bộ câu hỏi khác (vd. corpus luật) mà không sửa code:
+#   EVAL_DATASET_FILE=tests/legal_eval_queries.json EVAL_REPORT_FILE=eval_legal.json python tests/evaluate_pipeline.py
+EVAL_DATASET_FILE = os.getenv("EVAL_DATASET_FILE", "").strip()
+EVAL_REPORT_FILE = os.getenv("EVAL_REPORT_FILE", "eval_report.json").strip() or "eval_report.json"
 
 EVAL_DATASET = [
     # Factoid nghỉ phép (single-hop)
@@ -87,6 +98,12 @@ EVAL_DATASET = [
     },
 ]
 
+# Nạp dataset thay thế từ file JSON (list các {"query", "context_hint"}).
+if EVAL_DATASET_FILE and os.path.exists(EVAL_DATASET_FILE):
+    with open(EVAL_DATASET_FILE, encoding="utf-8") as _f:
+        EVAL_DATASET = json.load(_f)
+    print(f"Loaded {len(EVAL_DATASET)} queries from {EVAL_DATASET_FILE}")
+
 JUDGE_PROMPT_FAITHFULNESS = """
 Bạn là một giám khảo chấm điểm khắt khe. Nhiệm vụ của bạn là đánh giá "Độ trung thực" (Faithfulness) của câu trả lời so với Tài liệu tham khảo.
 Quy tắc:
@@ -143,19 +160,21 @@ CÁC ĐOẠN TÀI LIỆU TRUY XUẤT:
 
 def _get_score_from_llm(prompt: str) -> int:
     """Gọi LLM để lấy điểm số từ 0-10."""
+    import re
     try:
         model = get_model()
         messages = [{"role": "user", "content": prompt.strip()}]
         response = model.create_chat_completion(
             messages=messages,
-            max_tokens=5,
+            max_tokens=8,
             temperature=0.0,
         )
         text = response["choices"][0]["message"]["content"].strip()
-        # Extract number
-        nums = [int(s) for s in text.split() if s.isdigit()]
-        if nums:
-            return min(10, max(0, nums[0]))
+        # Extract number: model thường trả "**8**", "8.", "Điểm: 8" — không phải
+        # token thuần số nên không dùng str.isdigit().
+        m = re.search(r"\d+", text)
+        if m:
+            return min(10, max(0, int(m.group())))
         return 0
     except Exception as e:
         logger.error(f"Lỗi chấm điểm: {e}")
@@ -166,8 +185,8 @@ async def evaluate_single_query(query: str) -> dict:
     """Chạy pipeline và chấm điểm cho 1 query."""
     logger.info(f"Evaluating: {query}")
     
-    # 1. Retrieval
-    results = search(query, top_k=3)
+    # 1. Retrieval — pool giống production (top_k * RETRIEVAL_CANDIDATE_MULTIPLIER)
+    results = search(query, top_k=3 * RETRIEVAL_CANDIDATE_MULTIPLIER)
     results = rerank_results(query, results, top_n=3)
     
     context_text = "\n---\n".join([r["text"] for r in results])
@@ -238,7 +257,7 @@ async def run_evaluation_suite():
     print("="*60)
     
     # Save report
-    report_path = "eval_report.json"
+    report_path = EVAL_REPORT_FILE
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=4)
     print(f"Đã lưu report chi tiết tại {report_path}")

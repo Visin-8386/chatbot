@@ -60,7 +60,7 @@ CHUNK_SIZE = 800          # characters per chunk (optimized for Vietnamese)
 CHUNK_OVERLAP = 150       # overlap between chunks
 MIN_CHUNK_CHARS = int(os.getenv("MIN_CHUNK_CHARS", "120"))
 ENABLE_CHUNK_DEDUP = os.getenv("ENABLE_CHUNK_DEDUP", "1") == "1"
-MAX_CHUNKS_PER_SECTION = int(os.getenv("MAX_CHUNKS_PER_SECTION", "250"))
+MAX_CHUNKS_PER_SECTION = int(os.getenv("MAX_CHUNKS_PER_SECTION", "2000"))
 PDF_MARGIN_REPEAT_RATIO = float(os.getenv("PDF_MARGIN_REPEAT_RATIO", "0.8"))
 
 # Generation context budget
@@ -86,7 +86,7 @@ HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))  # hằng số RRF khi HYBRI
 TOP_K = int(os.getenv("TOP_K", "6"))                 # number of results to return
 ENABLE_CONTEXT_EXPANSION = os.getenv("ENABLE_CONTEXT_EXPANSION", "1") == "1" # Tự động lấy chunk trước/sau
 SIMILARITY_THRESHOLD = 30 # minimum similarity % to include in results
-RETRIEVAL_CANDIDATE_MULTIPLIER = int(os.getenv("RETRIEVAL_CANDIDATE_MULTIPLIER", "4"))
+RETRIEVAL_CANDIDATE_MULTIPLIER = int(os.getenv("RETRIEVAL_CANDIDATE_MULTIPLIER", "3"))
 RERANK_EMBEDDING_WEIGHT = float(os.getenv("RERANK_EMBEDDING_WEIGHT", "0.75"))
 RERANK_KEYWORD_WEIGHT = float(os.getenv("RERANK_KEYWORD_WEIGHT", "0.25"))
 # Reranker (SOTA Vietnamese default; free + offline after first download)
@@ -102,12 +102,16 @@ RERANKER_DEVICE = _RERANKER_DEVICE_ENV if _RERANKER_DEVICE_ENV in ("auto", "cuda
 # CPU inference (~100-300ms/query) is fast enough and keeps GPU for generation.
 _EMBEDDING_DEVICE_ENV = os.getenv("EMBEDDING_DEVICE", "cpu").strip().lower()
 EMBEDDING_DEVICE = _EMBEDDING_DEVICE_ENV if _EMBEDDING_DEVICE_ENV in ("auto", "cuda", "cpu") else "cpu"
-# Truncate chunk text khi rerank: 300 chars (~60-80 tokens) đủ để judge relevance
-RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "300"))
+# Truncate chunk text khi rerank: 500 chars — đủ trọn chunk luật (~650 ký tự)
+# để cross-encoder thấy cả điều khoản nằm cuối chunk (300 cắt mất đáp án "40 giờ").
+RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "500"))
 
 # Clarification Gate Thresholds
-CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "25"))
-CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "0.5"))
+# Lưu ý: trên corpus lớn, các đoạn boilerplate trùng nhau làm top-score thấp giả
+# và margin = 0; ngưỡng cũ (25 / 0.5) hỏi lại cả câu hỏi rõ ràng. search() đã
+# dedupe text trùng nên margin giờ mới phản ánh khác biệt thực.
+CLARIFICATION_MIN_TOP_SIMILARITY = float(os.getenv("CLARIFICATION_MIN_TOP_SIMILARITY", "18"))
+CLARIFICATION_MARGIN_MIN = float(os.getenv("CLARIFICATION_MARGIN_MIN", "3.0"))
 CLARIFICATION_HIGH_CONFIDENCE = float(os.getenv("CLARIFICATION_HIGH_CONFIDENCE", "40"))
 SELF_CHECK_MIN_GROUNDEDNESS = float(os.getenv("SELF_CHECK_MIN_GROUNDEDNESS", "0.35"))
 

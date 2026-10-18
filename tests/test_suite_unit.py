@@ -29,6 +29,9 @@ from backend.generator import crag_check_relevance, hyde_expand_query
 @pytest.fixture(autouse=True)
 def fresh_db():
     import sqlite3
+    # Các module test khác cũng patch _cm.DB_PATH lúc import (pytest collect
+    # tất cả trước khi chạy) — re-assert để không init vào DB của module khác.
+    _cm.DB_PATH = _tmp_db.name
     conn = sqlite3.connect(_tmp_db.name)
     conn.execute("DROP TABLE IF EXISTS chat_turns")
     conn.commit(); conn.close()

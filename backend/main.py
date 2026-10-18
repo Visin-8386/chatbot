@@ -24,6 +24,7 @@ from backend.config import (
     UPLOAD_DIR,
     SUPPORTED_EXTENSIONS,
     TOP_K,
+    RETRIEVAL_CANDIDATE_MULTIPLIER,
     MAX_UPLOAD_BYTES,
     API_KEY,
     CORS_ORIGINS,
@@ -245,11 +246,11 @@ async def _run_rag_pipeline(request: SearchRequest, total_start: float):
 
     # 2. Retrieve & Rerank
     retrieve_start = time.perf_counter()
-    results = await run_in_threadpool(search, retrieval_query, request.top_k * 2)
+    results = await run_in_threadpool(search, retrieval_query, request.top_k * RETRIEVAL_CANDIDATE_MULTIPLIER)
 
     # Fallback to raw query if rewritten retrieval query yielded poor results
     if (not results or (results and results[0].get("similarity", 0) < 35)) and retrieval_query != request.query.strip():
-        raw_results = await run_in_threadpool(search, request.query.strip(), request.top_k * 2)
+        raw_results = await run_in_threadpool(search, request.query.strip(), request.top_k * RETRIEVAL_CANDIDATE_MULTIPLIER)
         if raw_results and (not results or raw_results[0].get("similarity", 0) > results[0].get("similarity", 0)):
             logger.info("[Retrieval] Fallback to raw query search yielded better results.")
             results = raw_results
