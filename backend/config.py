@@ -102,6 +102,9 @@ RERANKER_DEVICE = _RERANKER_DEVICE_ENV if _RERANKER_DEVICE_ENV in ("auto", "cuda
 # CPU inference (~100-300ms/query) is fast enough and keeps GPU for generation.
 _EMBEDDING_DEVICE_ENV = os.getenv("EMBEDDING_DEVICE", "cpu").strip().lower()
 EMBEDDING_DEVICE = _EMBEDDING_DEVICE_ENV if _EMBEDDING_DEVICE_ENV in ("auto", "cuda", "cpu") else "cpu"
+# Model card AITeamVN/Vietnamese_Embedding_v2: huấn luyện query 256 / passage 2048
+# token — cap 2048 tránh nổ activation với chunk khổng lồ (từng OOM 7.4GB VRAM).
+EMBEDDING_MAX_SEQ_LENGTH = int(os.getenv("EMBEDDING_MAX_SEQ_LENGTH", "2048"))
 # Truncate chunk text khi rerank: 500 chars — đủ trọn chunk luật (~650 ký tự)
 # để cross-encoder thấy cả điều khoản nằm cuối chunk (300 cắt mất đáp án "40 giờ").
 RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "500"))
