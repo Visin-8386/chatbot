@@ -56,12 +56,31 @@ def get_tokenizer():
     return None
 
 
+def _preload_torch_models() -> None:
+    """Nạp embedding + reranker TRƯỚC llama_cpp (xem chú thích trong get_model)."""
+    try:
+        from backend.embedding_service import get_model as _get_embedding_model
+        _get_embedding_model()
+    except Exception as e:
+        logger.warning("Embedding preload before LLM failed: {}", e)
+    try:
+        get_reranker()
+    except Exception as e:
+        logger.warning("Reranker preload before LLM failed: {}", e)
+
+
 def get_model() -> Llama:
     """Load and cache the GGUF model on first use (sequential preload — VRAM safe)."""
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
+                # Windows + llama_cpp (CUDA): nạp model torch (embedding, reranker)
+                # SAU khi llama_cpp active gây access violation native khi đọc
+                # safetensors (tái hiện: LLM->emb->rerank crash; emb->rerank->LLM OK).
+                # Giữ invariant: mọi torch model load xong TRƯỚC llama_cpp.
+                _preload_torch_models()
+
                 logger.info("Downloading/Loading GGUF Model: {} ({})", LLM_MODEL, LLM_GGUF_FILENAME)
 
                 # Download model file if not exists
