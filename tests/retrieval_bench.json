@@ -1,0 +1,74 @@
+[
+  {
+    "id": "nd293_hieu_luc",
+    "query": "Nghị định 293/2025/NĐ-CP quy định mức lương tối thiểu vùng có hiệu lực thi hành từ ngày nào và thay thế văn bản nào?",
+    "gold_files": ["nghi-dinh-293-2025-nd-cp"],
+    "must": ["74/2024"]
+  },
+  {
+    "id": "nd293_luong_vung1",
+    "query": "Mức lương tối thiểu vùng I theo Nghị định 293/2025/NĐ-CP là bao nhiêu?",
+    "gold_files": ["nghi-dinh-293-2025-nd-cp"],
+    "must": ["5.310.000"]
+  },
+  {
+    "id": "bao_truoc_nsdl",
+    "query": "Người sử dụng lao động đơn phương chấm dứt hợp đồng lao động không xác định thời hạn phải báo trước cho người lao động ít nhất bao nhiêu ngày?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 36", "45 ngày"]
+  },
+  {
+    "id": "nghi_phep_nam_12",
+    "query": "Người lao động làm việc đủ 12 tháng cho một người sử dụng lao động thì được nghỉ hằng năm bao nhiêu ngày?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 113", "12 ngày làm việc"]
+  },
+  {
+    "id": "tuoi_nghi_huu",
+    "query": "Tuổi nghỉ hưu của người lao động trong điều kiện lao động bình thường năm 2021 là bao nhiêu?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 169", "3 tháng"]
+  },
+  {
+    "id": "thu_viec_max",
+    "query": "Thời gian thử việc tối đa đối với công việc cần trình độ cao đẳng là bao lâu?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 25", "60 ngày"]
+  },
+  {
+    "id": "lam_them_max",
+    "query": "Người lao động được làm thêm tối đa bao nhiêu giờ trong một tháng?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 107", "40 giờ"]
+  },
+  {
+    "id": "lam_them_le_300",
+    "query": "Làm thêm giờ vào ngày lễ, Tết được trả lương ít nhất bao nhiêu phần trăm?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 98", "300%"]
+  },
+  {
+    "id": "nghi_le_11",
+    "query": "Người lao động được nghỉ lễ, Tết tổng cộng bao nhiêu ngày trong một năm?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 112", "Giỗ Tổ Hùng Vương"]
+  },
+  {
+    "id": "tnhh_50",
+    "query": "Công ty trách nhiệm hữu hạn hai thành viên trở lên có tối đa bao nhiêu thành viên?",
+    "gold_files": ["law-2020-luat-doanh-nghiep"],
+    "must": ["Điều 46", "50 thành viên"]
+  },
+  {
+    "id": "gio_lam_8",
+    "query": "Thời giờ làm việc bình thường tối đa trong một ngày là bao nhiêu giờ?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 105", "8 giờ"]
+  },
+  {
+    "id": "nghi_giua_gio_30",
+    "query": "Người lao động được nghỉ giữa giờ ít nhất bao lâu mỗi ngày?",
+    "gold_files": ["code-2019-bo-luat-lao-dong"],
+    "must": ["Điều 109", "30 phút"]
+  }
+]
