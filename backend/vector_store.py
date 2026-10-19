@@ -209,6 +209,92 @@ def _dedupe_by_text(items: List[Dict]) -> List[Dict]:
     return deduped
 
 
+_QUERY_DOC_NUMBER_RE = re.compile(r"\d{1,4}/\d{4}(?:/[A-Za-zĐđ\-]+)?")
+_QUERY_ARTICLE_RE = re.compile(r"[Đđ]i[eề]u\s+(\d+)")
+
+
+def _extract_query_entities(query: str) -> List[str]:
+    """Trích số hiệu văn bản (293/2025/NĐ-CP) và số điều (Điều 107) từ query."""
+    entities: List[str] = []
+    for m in _QUERY_DOC_NUMBER_RE.finditer(query):
+        entities.append(m.group(0))
+    for m in _QUERY_ARTICLE_RE.finditer(query):
+        entities.append(f"Điều {m.group(1)}.")
+    return entities
+
+
+def _lookup_entity_sources(entity: str) -> set:
+    """Tìm các source (file) có chunk chứa nguyên văn số hiệu văn bản.
+
+    Số hiệu thường chỉ xuất hiện ở phần đầu phụ lục/tiêu đề chứ không lặp lại
+    trong từng điều — lift cả văn bản để chunk trả lời (vd. Điều 5 "hết hiệu
+    lực") được đưa lên mà không cần dense hiểu token số hiệu hiếm.
+    """
+    try:
+        collection = get_collection()
+        res = collection.get(
+            where_document={"$contains": entity},
+            include=["metadatas"],
+            limit=500,
+        )
+        return {(m or {}).get("source") for m in res.get("metadatas", []) if m}
+    except Exception as e:
+        logger.warning("Entity source lookup failed for {}: {}", entity, e)
+        return set()
+
+
+def _apply_legal_entity_boost(query: str, items: List[Dict]) -> List[Dict]:
+    """Cộng điểm cho chunk chứa đúng entity mà query nhắc tên đích danh.
+
+    Vì sao cần: embedding kém với token số hiệu hiếm (293/2025/NĐ-CP -> dense
+    rank ~92/100) trong khi fusion weighted cap nhánh BM25 ở (1-w)*100 điểm —
+    chunk đúng dù BM25 rank 1 vẫn có thể thua hàng loạt chunk dense tầm thường.
+    "Điều N." chỉ khớp dạng header (có dấu chấm) để tránh cross-reference
+    "tại Điều 35 của Bộ luật này".
+    """
+    from backend.config import (
+        LEGAL_ENTITY_BOOST, LEGAL_ENTITY_BOOST_DOC, LEGAL_ENTITY_BOOST_ARTICLE,
+        LEGAL_ENTITY_BOOST_CAP, LEGAL_ENTITY_BOOST_SOURCE,
+    )
+    if not LEGAL_ENTITY_BOOST:
+        return items
+    entities = _extract_query_entities(query)
+    if not entities:
+        return items
+
+    # Resolve các số hiệu văn bản -> tập source chứa chúng (một lần/văn bản).
+    doc_entities = [e for e in entities if not e.startswith("Điều")]
+    entity_sources: Dict[str, set] = {}
+    for ent in doc_entities:
+        entity_sources[ent] = _lookup_entity_sources(ent)
+
+    boosted_any = False
+    for item in items:
+        text = item.get("match_text") or item.get("text") or ""
+        text_lower = text.lower()
+        source = (item.get("metadata") or {}).get("source", "")
+        bonus = 0.0
+        for ent in entities:
+            if ent.startswith("Điều"):
+                if ent in text:
+                    bonus += LEGAL_ENTITY_BOOST_ARTICLE
+            elif ent.lower() in text_lower:
+                bonus += LEGAL_ENTITY_BOOST_DOC
+            elif source and source in entity_sources.get(ent, ()):
+                # Chunk cùng văn bản nhưng không chứa số hiệu (vd. Điều 5 ND293)
+                bonus += LEGAL_ENTITY_BOOST_SOURCE
+        if bonus > 0:
+            bonus = min(bonus, LEGAL_ENTITY_BOOST_CAP)
+            item["similarity"] = round(float(item.get("similarity", 0)) + bonus, 1)
+            item["score"] = float(item.get("score", 0)) + bonus
+            boosted_any = True
+
+    if boosted_any:
+        items = sorted(items, key=lambda r: float(r.get("score", 0)), reverse=True)
+        logger.info("Legal entity boost applied for entities: {}", entities)
+    return items
+
+
 def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     """
     Search for relevant document chunks using Hybrid Search (Vector + BM25).
@@ -224,12 +310,18 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     # Pool 100 (thay vì 50): HNSW recall ở corpus 69k chunk thấp hơn với k nhỏ —
     # các chunk đúng có thể nằm ngoài top-50 khi hàng chục bản boilerplate
     # điểm cao chen chúc. Dedupe phía sau sẽ dọn các bản trùng.
-    query_embedding = embed_query(query)
-    vector_results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=min(collection.count(), 100), # Get candidates for fusion
-        include=["documents", "metadatas", "distances"]
-    )
+    # Nếu embedding lỗi (đã quan sát NaN thoáng qua do môi trường), hạ cấp sang
+    # BM25-only thay vì làm sập toàn bộ truy vấn.
+    try:
+        query_embedding = embed_query(query)
+        vector_results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=min(collection.count(), 100), # Get candidates for fusion
+            include=["documents", "metadatas", "distances"]
+        )
+    except Exception as e:
+        logger.error("Dense retrieval failed ({}); falling back to BM25-only.", e)
+        vector_results = None
 
     # 2. BM25 Search (Sparse)
     bm25_results_list = []
@@ -296,6 +388,10 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     # giống hệt nhau (vd. điều về dân số xuất hiện trong ~100 luật). Nếu không
     # lọc, các bản sao chiếm hết slot ngữ cảnh và đẩy chunk trả lời đúng xuống.
     final_results = _dedupe_by_text(final_results)
+
+    # 4c. Legal entity boost: query nhắc đích danh số hiệu/số điều -> ưu tiên
+    # chunk chứa đúng chuỗi đó (xem _apply_legal_entity_boost).
+    final_results = _apply_legal_entity_boost(query, final_results)
 
     # 5. Context Expansion (Sliding Window)
     top_items = final_results[:effective_top_k]

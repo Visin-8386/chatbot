@@ -288,6 +288,11 @@ def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict
     # kém (paraphrase đúng chỉ ~0.06 trong khi exact-match ~0.99) — nhưng thứ tự
     # luôn đúng, nên min-max giữ nguyên ordering mà vẫn phân biệt được.
     raw = [float(s) for s in scores]
+    # Guard NaN (cùng lớp lỗi fp32 LayerNorm với embedding): giữ thứ tự hybrid
+    # thay vì để NaN phá min-max và làm loạn sort.
+    if any(s != s for s in raw):
+        logger.warning("Reranker returned NaN scores; skipping rerank, keeping hybrid order.")
+        return results[:top_n]
     lo, hi = min(raw), max(raw)
     for i, res in enumerate(results):
         res["rerank_score"] = raw[i]

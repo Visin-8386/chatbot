@@ -105,9 +105,22 @@ EMBEDDING_DEVICE = _EMBEDDING_DEVICE_ENV if _EMBEDDING_DEVICE_ENV in ("auto", "c
 # Model card AITeamVN/Vietnamese_Embedding_v2: huấn luyện query 256 / passage 2048
 # token — cap 2048 tránh nổ activation với chunk khổng lồ (từng OOM 7.4GB VRAM).
 EMBEDDING_MAX_SEQ_LENGTH = int(os.getenv("EMBEDDING_MAX_SEQ_LENGTH", "2048"))
-# Truncate chunk text khi rerank: 500 chars — đủ trọn chunk luật (~650 ký tự)
-# để cross-encoder thấy cả điều khoản nằm cuối chunk (300 cắt mất đáp án "40 giờ").
-RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "500"))
+# Truncate chunk text khi rerank: 800 chars — đo harness 22 câu: 500 cắt mất
+# đáp án nằm ở phần nối ngữ cảnh (bao_truoc_nsdl tụt khỏi top-6); 800 khôi phục
+# final@3 và nâng R@1 0.682->0.818. Cross-encoder vẫn nhanh ở mức này (CPU).
+RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "800"))
+
+# Legal Entity Boost: khi query nhắc đích danh số hiệu văn bản (293/2025/NĐ-CP)
+# hoặc số điều (Điều 107), cộng điểm cho chunk chứa đúng chuỗi đó. Dense embedding
+# yếu với token số hiệu hiếm, còn fusion weighted cap nhánh BM25 ở (1-w)*100=30 điểm
+# (dense_weight 0.7) nên chunk đúng (BM25 rank 2) vẫn thua chunk dense tầm thường
+# (~65). SOURCE-lift phải đủ lớn (45) để chunk trả lời của đúng văn bản (vd. Điều 5
+# ND293 "thay thế 74/2024") lọt vào top-18 dù dense không thấy nó trong top-100.
+LEGAL_ENTITY_BOOST = os.getenv("LEGAL_ENTITY_BOOST", "1") == "1"
+LEGAL_ENTITY_BOOST_DOC = float(os.getenv("LEGAL_ENTITY_BOOST_DOC", "25"))
+LEGAL_ENTITY_BOOST_ARTICLE = float(os.getenv("LEGAL_ENTITY_BOOST_ARTICLE", "18"))
+LEGAL_ENTITY_BOOST_SOURCE = float(os.getenv("LEGAL_ENTITY_BOOST_SOURCE", "45"))
+LEGAL_ENTITY_BOOST_CAP = float(os.getenv("LEGAL_ENTITY_BOOST_CAP", "70"))
 
 # Clarification Gate Thresholds
 # Lưu ý: trên corpus lớn, các đoạn boilerplate trùng nhau làm top-score thấp giả
