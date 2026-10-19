@@ -22,7 +22,23 @@ def test_weighted_missing_source_counts_zero():
 
 def test_weighted_single_bm25_scales_to_100():
     out = weighted_fuse({}, {"x": 5.0}, dense_weight=0.7)
-    assert out == {"x": 30.0}, out  # min-max(đơn trị)=100 -> 0.3*100
+    assert out == {"x": 30.0}, out  # max-norm(đơn trị)=100 -> 0.3*100
+
+
+def test_weighted_bm25_max_norm_no_boilerplate_saturation():
+    # Boilerplate luật làm điểm BM25 top-100 dồn cụm sát nhau; min-max cũ nén
+    # hit mạnh nhất xuống gần 0 (gold = min) nên chunk đúng tụt khỏi top-K.
+    # Max-norm neo 0 giữ nguyên tương quan tuyệt đối.
+    bm25 = {"gold": 42.618, "boilerplate": 42.9}
+    out = weighted_fuse({}, bm25, dense_weight=0.7)
+    assert abs(out["gold"] - 0.3 * (42.618 / 42.9) * 100) < 1e-3, out  # fused round 3 chữ số
+    assert out["gold"] > 29.0, out  # min-max cũ cho gold = 0
+
+
+def test_fuse_tie_break_is_deterministic():
+    # Điểm bằng nhau phải sắp theo doc_id để kết quả ổn định giữa các process.
+    ordered = fuse([("b", 50.0), ("a", 50.0)], [], method="weighted", dense_weight=0.7)
+    assert [doc_id for doc_id, _, _ in ordered] == ["a", "b"]
 
 
 def test_rrf_matches_classic_formula():
