@@ -28,6 +28,8 @@ wheels/
 # Project specific
 data/chroma_db/
 data/*.db
+data/*.db-shm
+data/*.db-wal
 uploads/
 test_data/
 logs/

@@ -134,13 +134,15 @@ def get_collection():
     return _collection
 
 
-def add_documents(chunks: List[Dict], doc_id: str) -> int:
+def add_documents(chunks: List[Dict], doc_id: str, rebuild_bm25: bool = True) -> int:
     """
     Add document chunks to the vector store.
     
     Args:
         chunks: List of {"text": "...", "metadata": {...}}
         doc_id: Unique document identifier
+        rebuild_bm25: Rebuild BM25 right away. Batch re-ingest nên đặt False
+            và rebuild một lần sau khi xong (tránh O(N) rebuild mỗi văn bản).
     
     Returns:
         Number of chunks added.
@@ -173,7 +175,8 @@ def add_documents(chunks: List[Dict], doc_id: str) -> int:
     )
 
     # Rebuild BM25 to include new docs
-    _initialize_bm25(force_rebuild=True)
+    if rebuild_bm25:
+        _initialize_bm25(force_rebuild=True)
 
     # GraphRAG-lite: index entities/edges (opt-in, never breaks ingest on failure)
     try:
@@ -463,8 +466,12 @@ def search(query: str, top_k: int = TOP_K) -> List[Dict]:
     return formatted
 
 
-def delete_document(doc_id: str) -> int:
-    """Delete all chunks belonging to a document."""
+def delete_document(doc_id: str, rebuild_bm25: bool = True) -> int:
+    """Delete all chunks belonging to a document.
+
+    Args:
+        rebuild_bm25: Rebuild BM25 right away (False cho batch re-ingest).
+    """
     collection = get_collection()
 
     # GraphRAG-lite: clean graph first (best-effort, never breaks deletion)
@@ -483,7 +490,8 @@ def delete_document(doc_id: str) -> int:
     if results["ids"]:
         collection.delete(ids=results["ids"])
         # Rebuild BM25 after deletion
-        _initialize_bm25(force_rebuild=True)
+        if rebuild_bm25:
+            _initialize_bm25(force_rebuild=True)
         return len(results["ids"])
     return 0
 
