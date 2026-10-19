@@ -95,9 +95,27 @@ F | 60 | Hoan tat
     assert all(len(chunk) <= 85 for chunk in chunks)
 
 
+def test_chunk_legal_text_splits_oversized_single_line_block() -> None:
+    # ND293: phụ lục dài nối sau điều cuối bị _split_into_blocks gộp newline
+    # thành một dòng khổng lồ; list/table splitter trả nguyên khối nên không
+    # được coi là "đã split" — phải fallback chẻ nhỏ thay vì phát ra khối 24k.
+    articles = "".join(
+        f"Điều {i}. Quy định số {i}\nNội dung điều {i} ngắn gọn.\n" for i in range(1, 6)
+    )
+    giant = "quy định chi tiết về mức lương và phụ cấp " * 120  # ~5k ký tự, một dòng
+    text = articles + "Điều 6. Phụ lục\n" + giant
+
+    chunks = chunk_text(text, chunk_size=800, overlap=100)
+
+    assert len(chunks) > 1
+    assert max(len(chunk) for chunk in chunks) < 1600
+    assert all(chunk.strip() for chunk in chunks)
+
+
 def main() -> None:
     test_pdf_margin_cleanup_conservative()
     test_chunk_text_quality()
+    test_chunk_legal_text_splits_oversized_single_line_block()
     print("Chunking tests passed.")
 
 

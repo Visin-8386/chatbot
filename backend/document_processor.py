@@ -627,6 +627,20 @@ def _split_list_block(unit: str, max_size: int) -> List[str]:
     return chunks
 
 
+def _split_is_effective(pieces: List[str], unit: str) -> bool:
+    """True nếu splitter thực sự chia khối (không trả nguyên khối ban đầu).
+
+    _split_list_block/_split_table_block trả [unit] nguyên vẹn khi text là một
+    dòng khổng lồ (newlines đã bị _split_into_blocks gộp thành spaces) —
+    không được coi là đã split, phải fallback sang sentence/word boundary.
+    """
+    if not pieces:
+        return False
+    if len(pieces) > 1:
+        return True
+    return len(pieces[0]) < len(unit)
+
+
 def _split_long_unit(unit: str, max_size: int) -> List[str]:
     """Split oversized text unit by sentence boundaries, fallback to hard split."""
     if len(unit) <= max_size:
@@ -636,12 +650,12 @@ def _split_long_unit(unit: str, max_size: int) -> List[str]:
 
     if content_kind == "table":
         table_chunks = _split_table_block(unit, max_size)
-        if table_chunks:
+        if _split_is_effective(table_chunks, unit):
             return table_chunks
 
     if content_kind == "list":
         list_chunks = _split_list_block(unit, max_size)
-        if list_chunks:
+        if _split_is_effective(list_chunks, unit):
             return list_chunks
 
     if "\n" in unit:
@@ -816,6 +830,13 @@ def _chunk_legal_text(text: str, chunk_size: int, overlap: int) -> List[str]:
             continue
         for i, piece in enumerate(body_chunks):
             prefix = header if i == 0 else f"{header} (tiếp theo)"
+            # Phụ lục/biểu mẫu dài không có mốc "Điều N." có thể dính vào điều
+            # cuối thành khối khổng lồ (ND293 Điều 5 + phụ lục = 24k ký tự):
+            # BM25 phạt nặng theo độ dài nên chunk kiểu này gần như vô hình.
+            if len(piece) > chunk_size * 2:
+                for sub in _split_long_unit(piece, body_budget):
+                    chunks.append(f"{prefix}\n{sub}")
+                continue
             chunks.append(f"{prefix}\n{piece}")
     return chunks
 
