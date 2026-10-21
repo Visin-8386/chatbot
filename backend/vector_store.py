@@ -45,6 +45,9 @@ COLLECTION_NAME = get_active_collection_name()
 # Global client
 _client = None
 _collection = None
+# Cache danh sách document cho /api/stats: scan metadata 75k chunk ~4.6s,
+# invalidate mỗi khi add/delete.
+_docs_cache = None
 
 _STOPWORDS = {
     "va", "và", "la", "là", "cua", "của", "cho", "tren", "trên", "duoc", "được",
@@ -62,6 +65,7 @@ def _tokenize_for_bm25(text: str) -> List[str]:
 # Global state for BM25
 _bm25_index = None
 _bm25_docs = [] # Stores (text, metadata) pairs corresponding to index
+_bm25_tokens = [] # Tokenized corpus song song _bm25_docs (tránh tokenize lại khi update)
 
 
 def _get_bm25_path():
@@ -70,9 +74,83 @@ def _get_bm25_path():
     return os.path.join(CHROMA_DIR, f"bm25_index_{safe}.pkl")
 
 
+def _save_bm25(path: str) -> None:
+    """Ghi BM25 index + docs xuống đĩa cho add/delete tăng dần.
+
+    Không lưu tokens: pickle tokens ~150MB làm mỗi lần add/delete chậm thêm
+    ~4s (vượt timeout 10s). Lần khởi động sau tokenize lại ~5s, chấp nhận được.
+    (Full rebuild từ Chroma vẫn lưu kèm tokens để startup sau re-ingest nhanh.)
+    """
+    os.makedirs(CHROMA_DIR, exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump({"index": _bm25_index, "docs": _bm25_docs}, f)
+
+
+def _rebuild_bm25_from_memory() -> None:
+    """Tái tạo BM25Okapi từ tokenized corpus trong bộ nhớ (không đọc Chroma)."""
+    global _bm25_index
+    if _bm25_tokens:
+        _bm25_index = BM25Okapi(_bm25_tokens)
+    else:
+        _bm25_index = None
+
+
+def _bm25_add_docs(new_docs: List[Dict]) -> None:
+    """Thêm chunk vào BM25 mà không rebuild toàn bộ corpus từ Chroma.
+
+    BM25Okapi tính IDF từ toàn corpus nên muốn "chuẩn" phải rebuild; nhưng
+    rebuild 75k chunk tốn ~24s (Chroma get 7s + tokenize 5s + build 2s +
+    pickle 3s) — không chấp nhận được trong request upload/delete. Cách tăng
+    dần: nối tokenized docs đã cache trong bộ nhớ và tái tạo BM25Okapi từ
+    danh sách token (không đọc lại Chroma, không tokenize lại) — ~2s cho 75k.
+    """
+    global _bm25_index, _bm25_docs, _bm25_tokens
+    if not new_docs:
+        return
+    if _bm25_index is None:
+        # Chưa có index trong bộ nhớ: nạp từ đĩa hoặc rebuild đầy đủ.
+        _initialize_bm25()
+        if _bm25_index is None:
+            _bm25_docs = list(new_docs)
+            _bm25_tokens = [_tokenize_for_bm25(d["text"]) for d in new_docs]
+            _rebuild_bm25_from_memory()
+            _save_bm25(_get_bm25_path())
+            return
+
+    _bm25_docs = list(_bm25_docs) + list(new_docs)
+    _bm25_tokens = list(_bm25_tokens) + [_tokenize_for_bm25(d["text"]) for d in new_docs]
+    _rebuild_bm25_from_memory()
+    _save_bm25(_get_bm25_path())
+    logger.info("BM25 incrementally updated to {} chunks.", len(_bm25_docs))
+
+
+def _bm25_remove_doc(doc_id: str) -> None:
+    """Loại chunk của một doc khỏi BM25 mà không đọc lại toàn bộ Chroma."""
+    global _bm25_index, _bm25_docs, _bm25_tokens
+    if _bm25_index is None:
+        # Chưa nạp BM25 vào RAM: xóa cache đĩa để lần khởi động sau rebuild
+        # từ Chroma, tránh index cũ vẫn còn chunk của doc đã xóa.
+        try:
+            os.remove(_get_bm25_path())
+        except FileNotFoundError:
+            pass
+        return
+    keep_idx = [
+        i for i, d in enumerate(_bm25_docs)
+        if (d.get("metadata") or {}).get("doc_id") != doc_id
+    ]
+    if len(keep_idx) == len(_bm25_docs):
+        return
+    _bm25_docs = [_bm25_docs[i] for i in keep_idx]
+    _bm25_tokens = [_bm25_tokens[i] for i in keep_idx]
+    _rebuild_bm25_from_memory()
+    _save_bm25(_get_bm25_path())
+    logger.info("BM25 updated after deleting doc {}: {} chunks left.", doc_id, len(_bm25_docs))
+
+
 def _initialize_bm25(force_rebuild: bool = False):
     """Load BM25 from disk or build from ChromaDB."""
-    global _bm25_index, _bm25_docs
+    global _bm25_index, _bm25_docs, _bm25_tokens
     
     path = _get_bm25_path()
     if not force_rebuild and os.path.exists(path):
@@ -81,6 +159,11 @@ def _initialize_bm25(force_rebuild: bool = False):
                 data = pickle.load(f)
                 _bm25_index = data["index"]
                 _bm25_docs = data["docs"]
+                # Cache token đã lưu (index cũ không có key này -> tokenize lại
+                # 1 lần; không ghi bù vì pickle tokens rất lớn).
+                _bm25_tokens = data.get("tokens") or [
+                    _tokenize_for_bm25(d["text"]) for d in _bm25_docs
+                ]
                 logger.info("Loaded BM25 index with {} chunks.", len(_bm25_docs))
                 return
         except Exception as e:
@@ -91,6 +174,7 @@ def _initialize_bm25(force_rebuild: bool = False):
     if collection.count() == 0:
         _bm25_index = None
         _bm25_docs = []
+        _bm25_tokens = []
         return
 
     logger.info("Building BM25 index from ChromaDB ({} chunks)...", collection.count())
@@ -104,17 +188,16 @@ def _initialize_bm25(force_rebuild: bool = False):
         docs.append({"text": text, "metadata": meta, "id": all_data["ids"][i]})
         tokenized_corpus.append(_tokenize_for_bm25(text))
     
+    _bm25_docs = docs
+    _bm25_tokens = tokenized_corpus
+    _rebuild_bm25_from_memory()
     if tokenized_corpus:
-        _bm25_index = BM25Okapi(tokenized_corpus)
-        _bm25_docs = docs
-        # Save to disk
         os.makedirs(CHROMA_DIR, exist_ok=True)
         with open(path, "wb") as f:
-            pickle.dump({"index": _bm25_index, "docs": _bm25_docs}, f)
+            pickle.dump({"index": _bm25_index, "docs": _bm25_docs, "tokens": _bm25_tokens}, f)
         logger.info("BM25 index built and saved.")
     else:
         _bm25_index = None
-        _bm25_docs = []
 
 
 def get_collection():
@@ -173,10 +256,15 @@ def add_documents(chunks: List[Dict], doc_id: str, rebuild_bm25: bool = True) ->
         documents=texts,
         metadatas=metadatas
     )
+    global _docs_cache
+    _docs_cache = None
 
-    # Rebuild BM25 to include new docs
+    # Cập nhật BM25 tăng dần (tránh rebuild toàn bộ 75k chunk ~24s/lần upload).
     if rebuild_bm25:
-        _initialize_bm25(force_rebuild=True)
+        _bm25_add_docs([
+            {"text": texts[i], "metadata": metadatas[i], "id": ids[i]}
+            for i in range(len(ids))
+        ])
 
     # GraphRAG-lite: index entities/edges (opt-in, never breaks ingest on failure)
     try:
@@ -489,19 +577,26 @@ def delete_document(doc_id: str, rebuild_bm25: bool = True) -> int:
 
     if results["ids"]:
         collection.delete(ids=results["ids"])
-        # Rebuild BM25 after deletion
+        global _docs_cache
+        _docs_cache = None
+        # Cập nhật BM25 tăng dần (không rebuild toàn bộ từ Chroma).
         if rebuild_bm25:
-            _initialize_bm25(force_rebuild=True)
+            _bm25_remove_doc(doc_id)
         return len(results["ids"])
     return 0
 
 
 def get_all_documents() -> List[Dict]:
-    """Get list of all unique documents in the store."""
+    """Get list of all unique documents in the store (cached)."""
+    global _docs_cache
+    if _docs_cache is not None:
+        return _docs_cache
+
     collection = get_collection()
 
     if collection.count() == 0:
-        return []
+        _docs_cache = []
+        return _docs_cache
 
     all_data = collection.get(include=["metadatas"])
     
@@ -517,7 +612,8 @@ def get_all_documents() -> List[Dict]:
             }
         docs[doc_id]["chunk_count"] += 1
 
-    return list(docs.values())
+    _docs_cache = list(docs.values())
+    return _docs_cache
 
 
 def get_stats() -> Dict:
