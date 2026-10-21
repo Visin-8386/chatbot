@@ -113,7 +113,7 @@ def get_reranker() -> CrossEncoder:
     if _reranker is None:
         with _reranker_lock:
             if _reranker is None:
-                from backend.config import RERANKER_MODEL, RERANKER_DEVICE
+                from backend.config import RERANKER_MODEL, RERANKER_DEVICE, RERANKER_INT8
                 logger.info("Loading Reranker: {} (device={})", RERANKER_MODEL, RERANKER_DEVICE)
                 if RERANKER_DEVICE == "cuda":
                     device = "cuda"
@@ -122,6 +122,12 @@ def get_reranker() -> CrossEncoder:
                 else:
                     device = "cuda" if torch.cuda.is_available() else "cpu"
                 _reranker = CrossEncoder(RERANKER_MODEL, device=device)  # Cache dir controlled via HF_HOME env var
+                if RERANKER_INT8 and device == "cpu":
+                    # XLM-R large fp32 trên CPU ~6.5s/9 cặp > SLA 5s; int8 ~3.5s.
+                    torch.quantization.quantize_dynamic(
+                        _reranker.model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True
+                    )
+                    logger.info("Reranker quantized to int8 (dynamic, Linear layers).")
                 logger.info("Reranker ready on {}.", device.upper())
     return _reranker
 
@@ -276,9 +282,13 @@ def rerank_results(query: str, results: List[Dict], top_n: int = 5) -> List[Dict
 
     reranker = get_reranker()
 
-    # Truncate text: 300 chars giữ đủ context để rerank nhưng giảm sequence length 65%
-    # -> giảm inference time từ ~4-5s xuống <500ms
-    from backend.config import RERANKER_MAX_CHARS
+    # Chỉ chấm RERANK_CANDIDATES ứng viên đầu (hybrid đã xếp hạng): chi phí
+    # cross-encoder tuyến tính theo số cặp, 18 cặp vượt SLA 5s trên CPU.
+    from backend.config import RERANKER_MAX_CHARS, RERANK_CANDIDATES
+    results = results[:max(top_n, RERANK_CANDIDATES)]
+
+    # Truncate text: 800 chars giữ đủ trọn chunk luật (đáp án thường nằm cuối
+    # điều khoản) — 500 cắt mất; 800 với 6 ứng viên vẫn đạt SLA 5s.
     pairs = [[query, r.get("match_text", r["text"])[:RERANKER_MAX_CHARS]] for r in results]
 
     scores = reranker.predict(pairs, batch_size=len(pairs), show_progress_bar=False)

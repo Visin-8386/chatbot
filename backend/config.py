@@ -109,6 +109,16 @@ EMBEDDING_MAX_SEQ_LENGTH = int(os.getenv("EMBEDDING_MAX_SEQ_LENGTH", "2048"))
 # đáp án nằm ở phần nối ngữ cảnh (bao_truoc_nsdl tụt khỏi top-6); 800 khôi phục
 # final@3 và nâng R@1 0.682->0.818. Cross-encoder vẫn nhanh ở mức này (CPU).
 RERANKER_MAX_CHARS = int(os.getenv("RERANKER_MAX_CHARS", "800"))
+# Số ứng viên đưa vào cross-encoder (lấy từ pool hybrid). Đo trên i5-10500H:
+# 18 ứng viên ~6.5s/lượt (vượt SLA 5s); 12 ứng viên ~5.5-6.5s khi máy nóng;
+# 6 ứng viên ~2.3s warm và vẫn R@1=12/12 trên harness (hybrid@18 đã 12/12
+# rank-1 nên ứng viên vàng luôn nằm trong top-6 trước khi rerank).
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "6"))
+# Dynamic int8 cho Linear layers khi rerank trên CPU: XLM-R large fp32 ~6.5s/9
+# ứng viên (vượt SLA 5s); int8 6 ứng viên ~2.3s warm, ~4.2s khi máy nguội.
+# Đo harness 12 câu với cấu hình chốt (6 ứng viên): R@1=R@3=R@6=12/12.
+# Tắt bằng RERANKER_INT8=0 để quay lại fp32.
+RERANKER_INT8 = os.getenv("RERANKER_INT8", "1") == "1"
 
 # Legal Entity Boost: khi query nhắc đích danh số hiệu văn bản (293/2025/NĐ-CP)
 # hoặc số điều (Điều 107), cộng điểm cho chunk chứa đúng chuỗi đó. Dense embedding
